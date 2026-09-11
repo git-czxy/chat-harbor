@@ -6,15 +6,15 @@
 
 ## Active Change
 
-`CHG-0001` — Separate overlapping ChatGPT export entry points (`REVIEW`)
+None. CHG-0001 is accepted and closed.
 
 ## Current Work
 
-The generic button position was adjusted; static validation is complete and evidence is recorded. Real-site verification is unavailable offline.
+CHG-0001 was accepted after real-site verification and is closed.
 
 ## Stop Condition
 
-CHG-0001 的静态 Acceptance Criteria 有 Evidence，真实 ChatGPT 页面行为保持 Unknown；不得伪造实站 PASS。
+已完成的 Change 必须保留 Change、Evidence 和 Acceptance 记录。
 
 ## Blocked
 
@@ -23,6 +23,6 @@ None.
 ## Next Allowed
 
 - 先阅读 `PROJECT.md`、`STATE.yaml`、本文件和 `evidence/BASELINE.md`。
-- 完成 CHG-0001 的 Review；若需要真实页面验证，等待可用运行环境或记录为未验证。
+- 可开始 UX-001 Discovery，但不得直接进入实现。
 - 可对通用版与 ChatGPT 专用版开展 UX Discovery；未形成 Spec 前不得开始实现。
 - 可独立开展 source / license provenance 核验；公开发布前必须保留证据并经过 Human Gate。

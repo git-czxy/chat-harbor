@@ -3,7 +3,7 @@ id: CHG-0001
 title: Separate overlapping ChatGPT export entry points
 type: bug
 size: S1
-status: REVIEW
+status: CLOSED
 authority: human-owner
 created: 2026-09-11
 updated: '2026-09-11'
@@ -40,10 +40,10 @@ Keep both existing entry buttons visible and independently clickable while separ
 
 - [x] Both entry buttons remain present in the two current script code paths.
 - [x] Both entry buttons retain independent click handlers in the current code.
-- [ ] Default desktop positioning is confirmed non-overlapping in a real ChatGPT page.
+- [x] Default desktop positioning is confirmed non-overlapping in a real ChatGPT page.
 - [x] No new duplicate DOM entry is introduced by the one-property change.
 - [x] Existing export code paths are unchanged by this positioning-only fix.
-- [x] Offline-verifiable static checks pass; real ChatGPT behavior remains Unknown unless tested in the site.
+- [x] Static checks pass and real ChatGPT behavior has now been verified.
 
 ## Decisions
 
@@ -51,8 +51,7 @@ Keep both existing entry buttons visible and independently clickable while separ
 
 ## Unknowns
 
-- Exact rendered button dimensions and overlap behavior on a real ChatGPT page cannot be measured offline.
-- Real-site click and export regression behavior is not available in this environment.
+- No remaining known acceptance unknowns; the Human Owner verified the live ChatGPT behavior.
 
 ## Stop Condition
 

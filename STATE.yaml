@@ -2,7 +2,7 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 8
+state_version: 10
 current_objective:
   id: OBJ-001
   title: 处理 CHG-0001：分离 ChatGPT 两个导出入口并保留真实网站验证边界。
@@ -10,26 +10,17 @@ current_milestone:
   id: M0
   title: PDR Adoption / Baseline Reconstruction
   status: completed
-active_changes:
-- CHG-0001
-active_work:
-  - id: CHG-0001
-    status: REVIEW
-    summary: '通用脚本入口上移至 bottom: 80px；静态证据已准备，真实页面未验证。'
-blocked:
-- id: BLK-001
-  item: 真实网站运行、UI 重叠复现和用户验收尚未执行
-  reason: 当前仓库没有可见的真实站点运行测试环境；本 Change 的实站验收因此保持 Unknown
-  status: deferred by scope
+active_changes: []
+active_work: []
+blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
 - 上游脚本 provenance、作者授权链和 license 兼容性。
 - 是否存在除当前 Git 历史外的 Trae/工作树运行配置。
-- 用户对当前实现的最终验收状态。
-- CHG-0001 在真实 ChatGPT 页面上的最终位置间距、独立点击和导出回归。
+- 用户对其他当前实现的最终验收状态。
 next_allowed:
-  - complete CHG-0001 review without claiming real-site PASS
-  - perform real ChatGPT verification when an authorized runtime is available
+- begin UX-001 discovery only as a separate authorized Change
+- verify GOV-001 provenance/license before public release
 prohibited:
 - treat historical plans as implementation evidence
 - silently override human decisions
