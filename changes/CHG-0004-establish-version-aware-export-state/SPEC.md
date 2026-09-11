@@ -55,7 +55,7 @@ legacyExported: boolean
 
 ## Manifest / recovery
 
-Manifest schema must include `schemaVersion`, `platform`, complete `conversationId`, `titleAtExport`, `contentVersion` (nullable), `sourceUpdatedAt` (nullable and explicitly non-authoritative), `exportedAt`, `representations`, attachment metadata, and artifact references. ZIP/backup recovery matches stable identity and contentVersion, never filename/title. A null version remains null after recovery.
+Manifest schema must include `schemaVersion`, `platform`, complete `conversationId`, `titleAtExport`, `contentVersion` (nullable), `sourceUpdatedAt` (nullable and explicitly non-authoritative), `exportedAt`, `representations`, attachment metadata, and artifact references. Known-version recovery matches stable conversation identity plus `contentVersion`; `artifactId` is optional for this match. Unknown/null-version recovery matches stable conversation identity plus persisted `artifactId`; `artifactId` is an artifact-instance identity, not a contentVersion and cannot prove content equivalence or freshness. A null version remains null and status remains Unknown after recovery. ZIP/backup runtime is outside this Change.
 
 ## Attachment semantics
 

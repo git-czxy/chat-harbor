@@ -16,7 +16,7 @@ CHG-0004 verification/remediation；CHG-0002 remains blocked and is not automati
 
 ## Stop Condition
 
-CHG-0004 当前 Stop Condition：第三轮 remediation 自动验证、Evidence、State 和治理文件一致，等待独立 Review；未经 Human Acceptance 不得关闭。
+CHG-0004 当前 Stop Condition：最终 verification cleanup 的自动测试、Evidence、State 和治理文件一致，等待独立 Review；未经 Human Acceptance 不得关闭。
 
 ## Blocked
 

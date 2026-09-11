@@ -38,6 +38,6 @@ Keep legacy stores readable and untouched. New records are additive and schema-v
 - Unknown current version never becomes latest solely because an old export exists, and is not forced into has updates.
 - One conversation supports multiple exported content versions and multiple representations per version.
 - Legacy ID data is preserved and only proves prior export.
-- Manifest/recovery uses identity + contentVersion, not title/filename.
+- Known recovery uses identity + contentVersion; Unknown recovery uses identity + persisted artifactId, never title/filename or null-version equality.
 - Attachment metadata and binary download remain separate.
 - Specification and implementation evidence are complete; this Change remains VERIFYING pending independent Review and Human Acceptance.

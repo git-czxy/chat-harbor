@@ -15,3 +15,7 @@ Regression tests cover legacy exported→observe-known→unknown, pending coexis
 ## Review remediation round 3
 
 Known observed versions now remain `unknown` when any prior successful artifact has an incomparable null version and no equal known version exists; `has_updates` requires all prior successful versions to be comparable and different. Legacy pending remains a retry/processing hint. Unknown artifacts merge and recover only by persisted `artifactId`; known artifacts recover by identity plus contentVersion without requiring artifactId. Tests cover artifact isolation and same-instance representation merge.
+
+## Final verification cleanup
+
+Direct regression assertions PASS for content mutation changing the fingerprint, title-only mutation preserving it, legacy pending-only semantics, known recovery without artifactId, null-version recovery with persisted artifactId, identity mismatch rejection, distinct Unknown artifact recovery, required manifest fields including `sourceUpdatedAt`, and Unknown manifest `contentVersion = null` with persisted `artifactId`. No GitHub CI result is claimed; validation is local automated testing only.
