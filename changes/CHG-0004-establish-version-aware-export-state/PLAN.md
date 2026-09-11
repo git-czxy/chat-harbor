@@ -2,12 +2,24 @@
 
 Historical note: the original readiness phase is complete; this file now records the implementation/remediation phase.
 
-## Discovery
+## Historical Readiness Phase
+
+The original Discovery/specification items below are retained as historical planning context. They are not current unexecuted work.
+
+## Implemented / Remediated Behavior
+
+Version strategy, four-state model, legacy additive migration, versioned artifacts, representation merge, and recovery compatibility are implemented and covered by Evidence.
+
+## Current Verification Status
+
+CHG-0004 remains VERIFYING pending independent Review and Human Acceptance. No closure or next-scope implementation is authorized here.
+
+## Historical Discovery
 
 - Confirm source fields from ChatGPT mapping, list payload, current normalized model, and legacy ID sets.
 - Preserve null/Unknown where no reliable revision exists.
 
-## Implementation sequence
+## Historical Implementation Sequence
 
 1. Add version signal abstraction and canonicalization schema without changing identity.
 2. Add version-aware export records alongside legacy exported/pending storage.
@@ -19,7 +31,7 @@ Historical note: the original readiness phase is complete; this file now records
 
 Keep legacy stores readable and untouched. New records are additive and schema-versioned; rollback ignores new records without deleting historical data.
 
-## Acceptance Criteria
+## Current Acceptance Criteria
 
 - No title change alters identity or content version.
 - Known versions distinguish never exported, has updates, and latest.
@@ -28,4 +40,4 @@ Keep legacy stores readable and untouched. New records are additive and schema-v
 - Legacy ID data is preserved and only proves prior export.
 - Manifest/recovery uses identity + contentVersion, not title/filename.
 - Attachment metadata and binary download remain separate.
-- Specification and implementation evidence are complete; this Change remains VERIFYING pending Human Acceptance.
+- Specification and implementation evidence are complete; this Change remains VERIFYING pending independent Review and Human Acceptance.

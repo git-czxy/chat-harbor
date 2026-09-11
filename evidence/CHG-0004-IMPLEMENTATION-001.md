@@ -11,3 +11,7 @@ Not implemented or claimed: cache/incremental refresh, attachment binary downloa
 ## Review remediation round 2
 
 Regression tests cover legacy exported→observe-known→unknown, pending coexistence, null-version recovery, distinct unknown artifact IDs, content/title fingerprint behavior, native precedence, no-signal Unknown, derived version propagation into JSON/manifest, required manifest fields, and identity+version recovery matching. The manifest claim is limited to the tested schema and recovery core; it does not claim full ZIP/backup runtime.
+
+## Review remediation round 3
+
+Known observed versions now remain `unknown` when any prior successful artifact has an incomparable null version and no equal known version exists; `has_updates` requires all prior successful versions to be comparable and different. Legacy pending remains a retry/processing hint. Unknown artifacts merge and recover only by persisted `artifactId`; known artifacts recover by identity plus contentVersion without requiring artifactId. Tests cover artifact isolation and same-instance representation merge.

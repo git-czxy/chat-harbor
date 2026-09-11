@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-第一次 PDR Adoption：完成当前实现的 Brownfield Baseline Reconstruction，并留下可恢复的状态、分类、证据和 Next Allowed。
+完成 CHG-0004 version-aware export state remediation 的独立 Review。
 
 ## Active Change
 
@@ -12,11 +12,11 @@
 
 ## Current Work
 
-The ChatHarbor main entry and workspace information architecture have been corrected; v0.4 is Legacy / Reference and will not be migrated.
+CHG-0004 verification/remediation；CHG-0002 remains blocked and is not automatically resumed.
 
 ## Stop Condition
 
-CHG-0002 当前 Stop Condition：主入口接管和视觉/文案修复完成并有 Evidence；真实页面行为仍需 Human Acceptance。
+CHG-0004 当前 Stop Condition：第三轮 remediation 自动验证、Evidence、State 和治理文件一致，等待独立 Review；未经 Human Acceptance 不得关闭。
 
 ## Blocked
 
@@ -24,9 +24,6 @@ CHG-0002: architecture dependency resolved, but still waiting for independent Hu
 
 ## Next Allowed
 
-- 先阅读 `PROJECT.md`、`STATE.yaml`、本文件和 `evidence/BASELINE.md`。
-- 完成静态验证后回到 VERIFYING。
-- 进行最小实站检查：入口打开新工作区，不再打开旧 Range 弹窗。
-- 在实站验证前不得标记 ACCEPTED 或 CLOSED。
-- 可对通用版与 ChatGPT 专用版开展 UX Discovery；未形成 Spec 前不得开始实现。
+- Review CHG-0004 Evidence and implementation state.
+- If Review passes, request/record Human Acceptance; do not self-close.
 - 可独立开展 source / license provenance 核验；公开发布前必须保留证据并经过 Human Gate。

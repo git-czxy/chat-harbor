@@ -2,7 +2,7 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 32
+state_version: 33
 current_objective:
   id: OBJ-001
   title: 验证 CHG-0004 Version-aware Export State 实现。
@@ -19,7 +19,7 @@ active_work:
   summary: CHG-0002 的架构依赖已满足；当前仍暂停，等待单独授权恢复 UX 实施。
 - id: CHG-0004
   status: VERIFYING
-  summary: Review remediation 已完成：version-aware pipeline、Legacy migration、representation merge、manifest/recovery core 和测试均通过，等待 Review。
+  summary: 第三轮 Review remediation 已完成：Unknown 状态/Artifact recovery、Legacy migration、manifest contract 与回归测试通过，保持 VERIFYING 等待独立 Review。
 blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
@@ -36,5 +36,5 @@ next_allowed:
 prohibited:
 - treat historical plans as implementation evidence
 - silently override human decisions
-last_validated_commit: 4ba9444
+last_validated_commit: b9561df7b99fcf25212d72dcdfc54a60befcdb9a
 last_updated: '2026-09-12'

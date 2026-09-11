@@ -27,15 +27,17 @@ Confirmed: identity is `platform + conversationId`; title is display-only; curre
 
 ### In
 
-- Content version candidate analysis and state model specification.
-- Legacy exported/pending migration rules.
-- Manifest/recovery schema and acceptance evidence plan.
+- Version-aware content observation and export state implementation.
+- Legacy exported/pending additive migration.
+- Versioned artifact manifest and identity/version recovery compatibility core.
 
 ### Out
 
-- Business-code implementation.
-- Cache/incremental refresh implementation.
-- Attachments download, batch/rate/pause, backup/restore implementation.
+- Production UI integration.
+- Cache/incremental refresh.
+- Attachment binary download.
+- Full ZIP/backup runtime.
+- Batch/rate/pause runtime.
 
 ## Acceptance Criteria
 
@@ -50,7 +52,8 @@ Confirmed: identity is `platform + conversationId`; title is display-only; curre
 ## Decisions
 
 - DEC-0001 UX identity/version decisions remain authoritative.
-- No new Human Product Decision is required for readiness; unknown-version semantics are specified conservatively for implementation review.
+- This implementation/remediation pass is technical contract work; it does not create or alter a Human Product Decision.
+- Human Acceptance is the only remaining Human Gate before closure.
 
 ## Unknowns
 
