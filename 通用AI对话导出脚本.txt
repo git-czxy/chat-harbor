@@ -3422,7 +3422,7 @@
     Object.assign(button.style, {
       position: "fixed",
       right: "20px",
-      bottom: "20px",
+      bottom: "80px",
       zIndex: "99999",
       padding: "10px 16px",
       borderRadius: "10px",

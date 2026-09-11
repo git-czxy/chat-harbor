@@ -6,15 +6,15 @@
 
 ## Active Change
 
-None.
+`CHG-0001` — Separate overlapping ChatGPT export entry points (`REVIEW`)
 
 ## Current Work
 
-Baseline reconstruction and PDR initialization are complete for this round.
+The generic button position was adjusted; static validation is complete and evidence is recorded. Real-site verification is unavailable offline.
 
 ## Stop Condition
 
-新 Codex 会话仅依赖仓库内容即可恢复：这是什么项目、当前做到哪里、下一步允许做什么、哪些事项尚未验证。
+CHG-0001 的静态 Acceptance Criteria 有 Evidence，真实 ChatGPT 页面行为保持 Unknown；不得伪造实站 PASS。
 
 ## Blocked
 
@@ -23,6 +23,6 @@ None.
 ## Next Allowed
 
 - 先阅读 `PROJECT.md`、`STATE.yaml`、本文件和 `evidence/BASELINE.md`。
-- 若获得授权，可为导出入口重叠创建 S1 Change 并先复现/验证；本轮不实施。
+- 完成 CHG-0001 的 Review；若需要真实页面验证，等待可用运行环境或记录为未验证。
 - 可对通用版与 ChatGPT 专用版开展 UX Discovery；未形成 Spec 前不得开始实现。
 - 可独立开展 source / license provenance 核验；公开发布前必须保留证据并经过 Human Gate。
