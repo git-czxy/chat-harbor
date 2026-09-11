@@ -6,15 +6,15 @@
 
 ## Active Change
 
-None. CHG-0001 is accepted and closed.
+`CHG-0002` — Redesign ChatHarbor conversation export workflow (`READY`)
 
 ## Current Work
 
-CHG-0001 was accepted after real-site verification and is closed.
+Discovery, Specification, gap analysis, and implementation readiness are complete; no business code was changed.
 
 ## Stop Condition
 
-已完成的 Change 必须保留 Change、Evidence 和 Acceptance 记录。
+CHG-0002 的 Stop Condition 已满足：仓库中的 Change / Spec / Plan / Decision / State 足以恢复目标、验收标准、Unknown 和下一步权限；本轮未实施业务代码。
 
 ## Blocked
 
@@ -23,6 +23,7 @@ None.
 ## Next Allowed
 
 - 先阅读 `PROJECT.md`、`STATE.yaml`、本文件和 `evidence/BASELINE.md`。
-- 可开始 UX-001 Discovery，但不得直接进入实现。
+- 由 Human Owner 决定是否授权后续业务代码实施。
+- 实施前必须解决或明确约束 Plan 中的技术 Unknowns。
 - 可对通用版与 ChatGPT 专用版开展 UX Discovery；未形成 Spec 前不得开始实现。
 - 可独立开展 source / license provenance 核验；公开发布前必须保留证据并经过 Human Gate。
