@@ -6,7 +6,7 @@ Turn the closed UX decisions into an implementation-ready work package without c
 
 ## Current Baseline
 
-The generic script already has adapter metadata, localStorage settings/history, a cache-like count map, a picker, and batched export. ChatGPT v0.4 additionally has list snapshots, first-page `(id, update_time)` fingerprints, project-space listing, localStorage exported/pending state, and a separate picker. These are source-confirmed; live completeness and content-version correctness are not.
+The generic script is the ChatHarbor primary implementation. ChatGPT v0.4 additionally has list snapshots, first-page `(id, update_time)` fingerprints, project-space listing, localStorage exported/pending state, and a separate picker; it is now Legacy / Reference only. These are source-confirmed; live completeness and content-version correctness are not.
 
 ## Approach
 
@@ -16,10 +16,11 @@ Implement in vertical slices around a logical conversation-index model while kee
 
 - [x] TASK-001: Complete source-based Discovery and gap analysis.
 - [x] TASK-002: Specify target workflow and acceptance model.
-- [ ] TASK-003: Verify archived ChatGPT project metadata behavior.
+- [ ] TASK-003: Verify archived ChatGPT project metadata behavior for ChatHarbor's ChatGPT adapter.
 - [x] TASK-004: Define conservative adapter capability handling: show Scope/archive only when metadata fields exist; keep unknown content version as null.
 - [x] TASK-005: Implement generic workspace shell and logical list/selection model.
-- [ ] TASK-006: Implement export rail, confirmation, progress, cancellation, and retry integration in a future authorized Change.
+- [ ] TASK-006: Implement remaining export rail, confirmation, progress, cancellation, and retry integration in ChatHarbor.
+- [x] TASK-007: Supersede migration of the new workspace into ChatGPT v0.4; retain v0.4 as Legacy / Reference.
 
 ## Risks
 
@@ -29,7 +30,7 @@ Implement in vertical slices around a logical conversation-index model while kee
 
 ## Rollback / Recovery
 
-Keep CHG-0002 documentation-only. Future implementation must preserve the current scripts until the new workflow has equivalent static and real-site evidence; revert by commit if acceptance fails.
+Keep ChatGPT v0.4 unchanged as Legacy / Reference. Future ChatHarbor implementation must preserve working export capabilities until equivalent evidence exists; revert by commit if acceptance fails.
 
 ## Validation
 

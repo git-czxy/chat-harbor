@@ -28,3 +28,11 @@ Result: PASS for syntax and diff checks.
 - ChatGPT v0.4 still has its own initial space-selection and picker UI.
 - No reliable content revision/fingerprint is available from current source; `contentVersion` intentionally remains null.
 - Archived ChatGPT project metadata, live rendering, large-list performance, click behavior, downloads, and end-to-end export regression require real-site validation.
+
+## Follow-up Verification — Main Entry Handoff
+
+Human Owner reported that the first live test still opened the legacy `Export conversations` range modal. Source inspection confirmed `mountButton()` was calling `askChoices(adapter)` while `showConversationPicker()` was not the main entry path. The legacy modal remains as an internal compatibility function; the main entry now calls `showConversationPicker()`.
+
+The main entry label is now `ChatHarbor`, with accessible label and tooltip `ChatHarbor · 导出对话`, and reuses the existing ChatGPT green `#10a37f` primary color. The v0.4 button and source remain unchanged as Legacy / Reference.
+
+This follow-up is statically validated only in this session; live verification is required to confirm the click opens the new workspace.

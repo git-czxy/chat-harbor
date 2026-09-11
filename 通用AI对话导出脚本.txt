@@ -3481,7 +3481,9 @@
 
   function mountButton() {
     const button = document.createElement("button");
-    button.textContent = "Export all chats";
+    button.textContent = "ChatHarbor";
+    button.setAttribute("aria-label", "ChatHarbor · 导出对话");
+    button.title = "ChatHarbor · 导出对话";
     Object.assign(button.style, {
       position: "fixed",
       right: "20px",
@@ -3490,7 +3492,7 @@
       padding: "10px 16px",
       borderRadius: "10px",
       border: "none",
-      background: "#111",
+      background: "#10a37f",
       color: "#fff",
       fontSize: "13px",
       cursor: "pointer",
@@ -3505,20 +3507,20 @@
         setStatus("Unsupported page.");
         return;
       }
-      const choices = await askChoices(adapter);
-      if (!choices) return;
-      button.disabled = true;
-      try {
-        await runExport(adapter, setStatus, choices);
-      } catch (error) {
-        console.error("[ai-chat-exporter]", error);
-        setStatus("Export failed — see console.");
-      } finally {
-        setTimeout(() => {
-          button.disabled = false;
-          button.textContent = "Export all chats";
-        }, 4e3);
-      }
+      await showConversationPicker(adapter, async (choices) => {
+        button.disabled = true;
+        try {
+          await runExport(adapter, setStatus, choices);
+        } catch (error) {
+          console.error("[ai-chat-exporter]", error);
+          setStatus("Export failed — see console.");
+        } finally {
+          setTimeout(() => {
+            button.disabled = false;
+            button.textContent = "ChatHarbor";
+          }, 4e3);
+        }
+      });
     });
     document.body.appendChild(button);
   }

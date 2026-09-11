@@ -31,3 +31,7 @@ Do not reopen the supplied decisions during this Discovery/Specification pass.
 ## Evidence / Source
 
 Explicit Human Decision in the UX-001 task message, 2026-09-11.
+
+## Update — 2026-09-11
+
+The Human Owner further decided that ChatGPT v0.4 will be discontinued as a product tool. ChatHarbor is the sole future primary product; v0.4 remains unchanged as Legacy / Reference Implementation for capability and interaction comparison. New capability work goes into the ChatHarbor generic architecture. Migration of the new workspace back into v0.4 is superseded and must not be pursued. This update does not rewrite the historical v0.4 source.
