@@ -3,7 +3,7 @@ id: CHG-0003
 title: Establish ChatHarbor Core + Platform Adapter Architecture
 type: architecture
 size: S3
-status: READY
+status: VERIFYING
 authority: human-owner
 created: 2026-09-11
 updated: '2026-09-11'
@@ -17,7 +17,7 @@ Human Decision DEC-0002 selects Extract & Recompose. Neither legacy script may r
 
 ## Scope
 
-This Change begins with Architecture Specification only. It defines boundaries, contracts, migration sequencing, risks, rollback, and acceptance evidence. It does not perform large-scale business-code migration.
+This Change began with Architecture Specification and now contains the first minimal implementation slice. It does not perform large-scale business-code migration.
 
 ## Dependencies
 

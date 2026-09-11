@@ -2,10 +2,10 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 23
+state_version: 24
 current_objective:
   id: OBJ-001
-  title: 建立 ChatHarbor Core + Platform Adapters，并在其上继续 CHG-0002。
+  title: 验证 CHG-0003 首个 ChatGPT 到 JSON/Markdown vertical slice。
 current_milestone:
   id: M0
   title: PDR Adoption / Baseline Reconstruction
@@ -18,8 +18,8 @@ active_work:
   status: BLOCKED
   summary: CHG-0002 保持 BLOCKED，依赖 CHG-0003 建立独立 ChatHarbor Core + Platform Adapters。
 - id: CHG-0003
-  status: READY
-  summary: Option C 已由 Human Decision 接受；当前仅完成 Architecture Specification，禁止大规模迁移。
+  status: VERIFYING
+  summary: 已建立独立 Core/Adapter 边界并完成首个 ChatGPT→Normalized Model→JSON+Markdown slice，等待集成验证。
 blocked:
 - CHG-0002: blocked by CHG-0003 until the recomposed Core is established.
 unknowns:
@@ -27,8 +27,9 @@ unknowns:
 - 上游脚本 provenance、作者授权链和 license 兼容性。
 - 是否存在除当前 Git 历史外的 Trae/工作树运行配置。
 - 用户对其他当前实现的最终验收状态。
+- ChatGPT 真实 API/browser wiring、附件下载和端到端页面行为尚未验证。
 next_allowed:
-- review CHG-0003 Architecture Specification and explicitly authorize its implementation
+- verify CHG-0003 vertical slice in real ChatGPT integration where available
 - keep CHG-0002 blocked until CHG-0003 establishes the Core boundary
 - verify GOV-001 provenance/license before public release
 prohibited:
