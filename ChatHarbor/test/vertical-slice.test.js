@@ -1,0 +1,22 @@
+import assert from 'node:assert/strict';
+import { createChatGPTAdapter } from '../adapters/chatgpt.js';
+import { createConversationIndex } from '../core/index.js';
+import { conversationIdentity, normalizeConversation } from '../models/conversation.js';
+import { exportConversation } from '../export/pipeline.js';
+
+const raw = { id: 'conv-1', title: 'Original', create_time: 1, update_time: 2, messages: [{ author: { role: 'user' }, content: { parts: ['Hello'] } }], attachments: [{ id: 'file-1', kind: 'pdf' }] };
+const adapter = createChatGPTAdapter({ list: async () => [raw], fetch: async () => raw });
+assert.equal(await adapter.detect(), true);
+const index = createConversationIndex(adapter);
+const [item] = await index.list();
+const conversation = await index.fetch(item);
+assert.equal(item.identity, 'chatgpt:conv-1');
+assert.equal(conversationIdentity({ ...conversation, title: 'Renamed' }), conversation.identity);
+assert.equal(conversation.contentVersion, null);
+const result = exportConversation(conversation);
+const json = JSON.parse(result.json);
+assert.equal(json.identity, result.manifest.identity);
+assert.match(result.markdown, /Hello/);
+assert.deepEqual(result.manifest.representations, ['json', 'markdown']);
+assert.equal(result.manifest.attachmentManifest[0].id, 'file-1');
+console.log('vertical slice PASS');
