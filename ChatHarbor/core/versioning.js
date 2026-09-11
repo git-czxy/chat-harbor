@@ -7,9 +7,10 @@ function stable(value) {
 }
 
 function digest(text) {
-  let hash = 2166136261;
-  for (let i = 0; i < text.length; i++) { hash ^= text.charCodeAt(i); hash = Math.imul(hash, 16777619); }
-  return `fp:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+  const mask = 0xffffffffffffffffn;
+  let left = 0xcbf29ce484222325n; let right = 0x84222325cbf29ce4n;
+  for (let i = 0; i < text.length; i++) { const c = BigInt(text.charCodeAt(i)); left = ((left ^ c) * 0x100000001b3n) & mask; right = ((right ^ (c + BigInt(i))) * 0x100000001b3n) & mask; }
+  return `fp128:${left.toString(16).padStart(16, '0')}${right.toString(16).padStart(16, '0')}`;
 }
 
 export function canonicalContent(conversation) {
