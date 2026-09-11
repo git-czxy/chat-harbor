@@ -2,39 +2,34 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 27
+state_version: 28
 current_objective:
   id: OBJ-001
-  title: Review CHG-0003 首个 ChatGPT 到 JSON/Markdown vertical slice。
+  title: 保持 CHG-0002 UX 工作待下一授权，不启动业务实现。
 current_milestone:
   id: M0
   title: PDR Adoption / Baseline Reconstruction
   status: completed
 active_changes:
 - CHG-0002
-- CHG-0003
 active_work:
 - id: CHG-0002
   status: BLOCKED
-  summary: CHG-0002 保持 BLOCKED，依赖 CHG-0003 建立独立 ChatHarbor Core + Platform Adapters。
-- id: CHG-0003
-  status: REVIEW
-  summary: 首个 ChatGPT Adapter→Normalized Model→JSON+Markdown slice 已通过 Human Browser Retest，等待 Review。
-blocked:
-- CHG-0002: blocked by CHG-0003 until the recomposed Core is established.
+  summary: CHG-0002 的架构依赖已满足；当前仍暂停，等待单独授权恢复 UX 实施。
+blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
 - 上游脚本 provenance、作者授权链和 license 兼容性。
 - 是否存在除当前 Git 历史外的 Trae/工作树运行配置。
 - 用户对其他当前实现的最终验收状态。
-- 实际附件文件下载、reliable contentVersion、export state/version migration、cache/incremental refresh、backup/restore、batch/rate/pause、retry/cancel/progress、production UX 尚未验证。
+- 实际附件文件下载、reliable contentVersion、export state/version migration、cache/incremental
+  refresh、backup/restore、batch/rate/pause、retry/cancel/progress、production UX 尚未验证。
 next_allowed:
-- review CHG-0003 acceptance evidence; do not close without required review
-- create a separate authorized Change for the next migration capability slice
-- keep CHG-0002 blocked until CHG-0003 establishes the Core boundary
+- explicitly authorize the next CHG-0002 UX implementation step or create a separate scoped Change
+- keep unverified export, attachment, cache, and production UX capabilities as Unknown
 - verify GOV-001 provenance/license before public release
 prohibited:
 - treat historical plans as implementation evidence
 - silently override human decisions
 last_validated_commit: 4ba9444
-last_updated: '2026-09-11'
+last_updated: '2026-09-12'

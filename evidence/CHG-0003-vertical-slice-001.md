@@ -44,6 +44,10 @@ This is a correction of the existing slice, not a new migration slice. Browser r
 
 The Human verified the installable pilot on a real ChatGPT page: browser wiring, Adapter list/fetch, raw payload retention, normalized non-empty ordered messages, JSON export, Markdown export with正文, shared JSON/Markdown identity, and attachment metadata normalization all PASS. `contentVersion = null` was accepted; no fabricated version was used.
 
+## Human Acceptance — 2026-09-12
+
+CHG-0003 is accepted. Human confirmed the Core/Adapter boundary, real Raw Source → Normalized Model → Representation flow, ChatGPT Adapter browser validation, JSON + Markdown output, stable identity, attachment metadata, Legacy preservation, and PDR validation. Unimplemented capabilities remain explicitly outside this Change.
+
 ## Unknown / Human test
 
 Live ChatGPT API/browser wiring, real payload coverage, attachment download, and browser end-to-end behavior remain Unknown/Human Test. This slice deliberately does not claim those validations.
