@@ -1,0 +1,43 @@
+schema_version: 0.1
+project:
+  name: "ai-chat-exporter"
+  status: active
+
+state_version: 1
+
+current_objective:
+  id: OBJ-001
+  title: "完成第一次 PDR Adoption：以当前实现为 Brownfield 基线并建立可恢复状态。"
+
+current_milestone:
+  id: M0
+  title: PDR Adoption / Baseline Reconstruction
+  status: completed
+
+active_changes: []
+active_work: []
+
+blocked:
+  - id: BLK-001
+    item: "真实网站运行、UI 重叠复现和用户验收尚未执行"
+    reason: "本轮明确不处理 UI Bug，且当前仓库没有可见的站点运行测试环境"
+    status: "deferred by scope"
+
+unknowns:
+  - "真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。"
+  - "上游脚本 provenance、作者授权链和 license 兼容性。"
+  - "是否存在除当前 Git 历史外的 Trae/工作树运行配置。"
+  - "用户对当前实现的最终验收状态。"
+
+next_allowed:
+  - review evidence/BASELINE.md and backlog/ACTIVE.md
+  - create and reproduce BUG-001 as an S1 Change if explicitly authorized
+  - start UX-001 discovery before any UX implementation
+  - verify GOV-001 provenance/license before public release
+
+prohibited:
+  - treat historical plans as implementation evidence
+  - silently override human decisions
+
+last_validated_commit: cf90fad3f5331c66e1013d76ce300217c73fed1e
+last_updated: "2026-09-11"
