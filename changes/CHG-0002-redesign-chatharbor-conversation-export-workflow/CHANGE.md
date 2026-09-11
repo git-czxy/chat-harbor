@@ -3,7 +3,7 @@ id: CHG-0002
 title: Redesign ChatHarbor conversation export workflow
 type: ux
 size: S2
-status: READY
+status: VERIFYING
 authority: human-owner
 created: 2026-09-11
 updated: '2026-09-11'

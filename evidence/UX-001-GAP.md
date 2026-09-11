@@ -33,6 +33,10 @@
 6. Reliable content-update signal: no confirmed content fingerprint or message revision; `update_time` is only a candidate signal.
 7. Runtime scale/performance and all target interactions require later implementation and real-site validation.
 
+## Implementation update
+
+The generic exporter now has a desktop-width two-column workspace, logical-list selection with Shift-click range support, pending/exported status filtering, full-filter select-all, capability-gated Scope/archive controls, and a versioned export-record storage skeleton. It records `contentVersion: null` when no reliable content signal exists. The existing ChatGPT v0.4 picker and space-selection flow remain unchanged in this slice.
+
 ## Readiness result
 
-READY FOR IMPLEMENTATION PLANNING, NOT IMPLEMENTATION. No technical finding requires changing the supplied Human Decisions. The listed Unknowns must be resolved or explicitly bounded in the implementation Change before claiming completion.
+PARTIALLY IMPLEMENTED / VERIFYING. No technical finding required changing the supplied Human Decisions. Remaining gaps and live/runtime Unknowns are explicit and block closure, not the current verification stage.

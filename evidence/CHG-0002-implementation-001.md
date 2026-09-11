@@ -1,0 +1,30 @@
+# CHG-0002 Implementation Evidence 001
+
+## Scope
+
+First implementation slice in `通用AI对话导出脚本.txt`; no GOV-001 work and no repository rename.
+
+## Changes
+
+- Expanded the generic picker to a desktop-first two-column layout with the list as the main area and strategy/record controls in a right rail.
+- Defaulted export status to `pending` and fixed the previous no-op `unexported` filter branch.
+- Made select-all operate on the complete filtered logical list rather than only rendered rows.
+- Added Shift-click range selection against the current filtered/sorted logical list.
+- Added adapter-capability-gated Scope and archive controls; controls remain hidden when metadata does not provide the capability.
+- Added versioned local export-record storage with stable `platform + conversationId`, title-at-export, source timestamp, exported timestamp, and `contentVersion: null` when no reliable content signal exists.
+
+## Validation
+
+```powershell
+Get-Content -Raw '通用AI对话导出脚本.txt' | node --check --input-type=commonjs
+Get-Content -Raw 'ChatGPT导出脚本（超保守版）v0.4.txt' | node --check --input-type=commonjs
+git diff --check
+```
+
+Result: PASS for syntax and diff checks.
+
+## Limitations / Unknown
+
+- ChatGPT v0.4 still has its own initial space-selection and picker UI.
+- No reliable content revision/fingerprint is available from current source; `contentVersion` intentionally remains null.
+- Archived ChatGPT project metadata, live rendering, large-list performance, click behavior, downloads, and end-to-end export regression require real-site validation.

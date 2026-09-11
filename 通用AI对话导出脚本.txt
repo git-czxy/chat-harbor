@@ -1452,6 +1452,9 @@
   function pendingKey(platform) {
     return `ai_exporter_pending_${platform}_v1`;
   }
+  function recordKey(platform) {
+    return `ai_exporter_records_${platform}_v1`;
+  }
   function readIdSet(key) {
     const parsed = readJSON(key, []);
     return new Set(Array.isArray(parsed) ? parsed : []);
@@ -1479,24 +1482,38 @@
     if (changed) writeIdSet(pendingKey(platform), set);
   }
   // 仅当对应批次 ZIP 确认下载成功后才把 pending 转为 exported，避免"没拿到文件"误记为已导出
-  function markConversationsExported(ids, platform) {
+  function markConversationsExported(ids, platform, metas = []) {
     if (!ids || ids.length === 0) return;
     const exported = getExportedIds(platform);
     const pending = getPendingIds(platform);
+    const records = readJSON(recordKey(platform), {});
+    const metaById = new Map(metas.map((meta) => [meta.id, meta]));
+    const exportedAt = new Date().toISOString();
     let changed = false;
     ids.forEach((id) => {
       if (!exported.has(id)) { exported.add(id); changed = true; }
       if (pending.delete(id)) changed = true;
+      const meta = metaById.get(id);
+      records[id] = {
+        platform,
+        conversationId: id,
+        titleAtExport: meta?.title ?? null,
+        contentVersion: null,
+        sourceUpdatedAt: meta?.updatedAt ?? null,
+        exportedAt
+      };
     });
     if (changed) {
       writeIdSet(exportedKey(platform), exported);
       writeIdSet(pendingKey(platform), pending);
+      writeJSON(recordKey(platform), records);
     }
   }
   function clearExportHistory(platform) {
     if (platform) {
       localStorage.removeItem(exportedKey(platform));
       localStorage.removeItem(pendingKey(platform));
+      localStorage.removeItem(recordKey(platform));
     } else {
       Object.keys(localStorage).forEach((k) => {
         if (k.startsWith("ai_exporter_exported_") || k.startsWith("ai_exporter_pending_")) {
@@ -1861,7 +1878,7 @@
         }
         batchedBlobs.push({ name: filename, blob });
         if (downloaded) {
-          markConversationsExported(batchOkIds, runCfg.platform);
+          markConversationsExported(batchOkIds, runCfg.platform, batch);
         }
       }
 
@@ -3120,10 +3137,12 @@
         filtered: [],
         selected: new Set(),
         query: "",
-        exportStatus: "all",
+        exportStatus: "pending",
         timeField: "updatedAt",
         startDate: "",
         endDate: "",
+        scope: "all",
+        archive: "unarchived",
         sortBy: "updatedAt",
         pageSize: 50,
         visibleCount: 50,
@@ -3141,7 +3160,7 @@
       const panel = document.createElement("div");
       Object.assign(panel.style, {
         background: "#fff", color: "#111", colorScheme: "light", borderRadius: "12px",
-        padding: "18px 20px", width: "680px", maxWidth: "94vw", maxHeight: "88vh",
+        padding: "18px 20px", width: "1100px", maxWidth: "96vw", maxHeight: "90vh",
         display: "flex", flexDirection: "column", fontSize: "13px",
         fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 30px rgba(0,0,0,.35)"
       });
@@ -3152,10 +3171,14 @@
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
           <input data-role="search" placeholder="按标题/ID 搜索…" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid #ccc;border-radius:6px">
+          <select data-role="scope" style="display:none"><option value="all">全部项目</option><option value="none">无项目</option><option value="unknown">归属未知</option></select>
+          <select data-role="archive" style="display:none"><option value="unarchived">未归档</option><option value="archived">已归档</option><option value="all">全部归档状态</option></select>
           <select data-role="exportStatus">
-            <option value="all">全部</option>
-            <option value="exported">已导出</option>
+            <option value="pending">待导出</option>
             <option value="unexported">未导出</option>
+            <option value="updated">有更新（需可靠版本信号）</option>
+            <option value="latest">已是最新</option>
+            <option value="all">全部</option>
           </select>
           <select data-role="timeField">
             <option value="updatedAt">按更新时间</option>
@@ -3209,12 +3232,24 @@
           <button data-role="exportAll" style="padding:7px 14px;border-radius:8px;border:1px solid #333;background:#fff;color:#111;cursor:pointer">导出全部</button>
           <button data-role="ok" style="padding:7px 14px;border-radius:8px;border:none;background:#111;color:#fff;cursor:pointer">导出选中</button>
         </div>`;
+      const [header, toolbar, strategy, records, list, footer] = Array.from(panel.children);
+      const workspace = document.createElement("div");
+      Object.assign(workspace.style, { display: "grid", gridTemplateColumns: "minmax(0, 1fr) 280px", gap: "12px", flex: "1", minHeight: "0" });
+      const main = document.createElement("div");
+      Object.assign(main.style, { minWidth: "0", display: "flex", flexDirection: "column" });
+      const rail = document.createElement("aside");
+      Object.assign(rail.style, { border: "1px solid #eee", borderRadius: "8px", padding: "10px", display: "flex", flexDirection: "column", gap: "10px", background: "#fafafa" });
+      main.append(list, footer);
+      rail.append(strategy, records);
+      workspace.append(main, rail);
+      panel.replaceChildren(header, toolbar, workspace);
       overlay.appendChild(panel);
 
       const statusEl = panel.querySelector('[data-role="status"]');
       const listEl = panel.querySelector('[data-role="list"]');
       const selCountEl = panel.querySelector('[data-role="selCount"]');
       const loadMoreBtn = panel.querySelector('[data-role="loadMore"]');
+      let lastSelectedId = null;
 
       const fmtKeys = [
         ["fmtReasoning", "includeReasoning"],
@@ -3233,10 +3268,20 @@
         const exportedSet = getExportedIds(adapter.platform);
         state.filtered = state.list.filter((item) => {
           if (q && !`${item.title ?? ""} ${item.id ?? ""}`.toLowerCase().includes(q)) return false;
-          if (state.exportStatus === "exported" && !exportedSet.has(item.id)) return false;
-          if (state.exportStatus === "unexported" && (exportedSet.has(item.id) || state.selected.has(item.id))) {
-            // unexported: 跳过已导出；未导出的选中项也保留
-          }
+          const status = exportedSet.has(item.id) ? "latest" : "unexported";
+          if (state.exportStatus === "pending" && status === "latest") return false;
+          if (state.exportStatus === "exported" && status !== "latest") return false;
+          if (state.exportStatus === "unexported" && status !== "unexported") return false;
+          if (state.exportStatus === "updated") return false;
+          if (state.exportStatus === "latest" && status !== "latest") return false;
+          const projectId = item.project_id ?? item.projectId ?? null;
+          const projectName = item.project_name ?? item.projectTitle ?? null;
+          if (state.scope === "none" && (projectId || projectName)) return false;
+          if (state.scope === "unknown" && (projectId || projectName)) return false;
+          if (state.scope !== "all" && state.scope !== "none" && state.scope !== "unknown" && projectId !== state.scope) return false;
+          const archived = Boolean(item.archived ?? item.isArchived ?? item.is_archived);
+          if (state.archive === "archived" && !archived) return false;
+          if (state.archive === "unarchived" && archived) return false;
           if (state.startDate || state.endDate) {
             const t = timeValue(item);
             if (state.startDate && t < state.startDate) return false;
@@ -3273,9 +3318,19 @@
             <span style="color:#999;flex:none;font-size:12px">${fmtTime(item)}</span>
             <span style="flex:none;font-size:11px;padding:1px 6px;border-radius:4px;${isExp ? "background:#e8f5e9;color:#2e7d32" : "background:#e3f2fd;color:#1565c0"}">${isExp ? "已导出" : "未导出"}</span>`;
           const cb = row.querySelector("input");
-          cb.addEventListener("change", () => {
+          cb.addEventListener("change", (event) => {
+            if (event.shiftKey && lastSelectedId) {
+              const from = state.filtered.findIndex((m) => m.id === lastSelectedId);
+              const to = state.filtered.findIndex((m) => m.id === item.id);
+              if (from >= 0 && to >= 0) {
+                const [lo, hi] = from < to ? [from, to] : [to, from];
+                state.filtered.slice(lo, hi + 1).forEach((m) => state.selected.add(m.id));
+                renderList();
+              }
+            }
             if (cb.checked) state.selected.add(item.id);
             else state.selected.delete(item.id);
+            lastSelectedId = item.id;
             updateSelCount();
           });
           row.addEventListener("click", (e) => {
@@ -3303,6 +3358,12 @@
           }
           loaded = true;
           statusEl.textContent = `共 ${state.list.length} 条对话`;
+          const scopeSelect = panel.querySelector('[data-role="scope"]');
+          const archiveSelect = panel.querySelector('[data-role="archive"]');
+          const scopes = new Map();
+          state.list.forEach((m) => { const id = m.project_id ?? m.projectId; const name = m.project_name ?? m.projectTitle; if (id) scopes.set(id, name || id); });
+          if (scopes.size) { scopeSelect.style.display = ""; scopes.forEach((name, id) => scopeSelect.insertAdjacentHTML("beforeend", `<option value="${String(id).replace(/"/g, "&quot;")}">${String(name).replace(/</g, "&lt;")}</option>`)); }
+          if (state.list.some((m) => Object.prototype.hasOwnProperty.call(m, "archived") || Object.prototype.hasOwnProperty.call(m, "isArchived") || Object.prototype.hasOwnProperty.call(m, "is_archived"))) archiveSelect.style.display = "";
           applyFilters();
           renderList();
         } catch (err) {
@@ -3330,6 +3391,8 @@
       const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
       panel.querySelector('[data-role="search"]').addEventListener("input", debounce((e) => { state.query = e.target.value; applyFilters(); renderList(); }, 200));
       panel.querySelector('[data-role="exportStatus"]').addEventListener("change", (e) => { state.exportStatus = e.target.value; applyFilters(); renderList(); });
+      panel.querySelector('[data-role="scope"]').addEventListener("change", (e) => { state.scope = e.target.value; applyFilters(); renderList(); });
+      panel.querySelector('[data-role="archive"]').addEventListener("change", (e) => { state.archive = e.target.value; applyFilters(); renderList(); });
       panel.querySelector('[data-role="timeField"]').addEventListener("change", (e) => { state.timeField = e.target.value; applyFilters(); renderList(); });
       panel.querySelector('[data-role="startDate"]').addEventListener("change", (e) => { state.startDate = e.target.value; applyFilters(); renderList(); });
       panel.querySelector('[data-role="endDate"]').addEventListener("change", (e) => { state.endDate = e.target.value; applyFilters(); renderList(); });
@@ -3343,7 +3406,7 @@
       panel.querySelector('[data-role="fmtFormat"]').addEventListener("change", (e) => { state.format.outputFormat = e.target.value; });
 
       panel.querySelector('[data-role="selectAll"]').addEventListener("click", () => {
-        state.filtered.slice(0, state.visibleCount).forEach((m) => state.selected.add(m.id));
+        state.filtered.forEach((m) => state.selected.add(m.id));
         renderList(); updateSelCount();
       });
       panel.querySelector('[data-role="clearSel"]').addEventListener("click", () => {

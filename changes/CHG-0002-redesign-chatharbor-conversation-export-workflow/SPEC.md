@@ -49,7 +49,7 @@ Progress SHALL show total progress, batch position, current conversation, succes
 
 ## Non-requirements
 
-- No implementation in CHG-0002.
+- ChatGPT-specific and cross-platform parity may remain partial during incremental implementation; no false parity claim is allowed.
 - No provenance/license decision.
 - No ChatHarbor repository/project rename.
 

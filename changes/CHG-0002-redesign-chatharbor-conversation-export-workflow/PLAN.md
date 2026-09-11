@@ -10,15 +10,15 @@ The generic script already has adapter metadata, localStorage settings/history, 
 
 ## Approach
 
-Implement later in vertical slices around a shared logical conversation-index model while keeping adapter-specific scope and version extraction behind adapter capabilities. First resolve or explicitly constrain the Unknowns below; then add the workspace shell, index/filter model, selection model, record/version model, and export/progress wiring in separate reviewable steps.
+Implement in vertical slices around a logical conversation-index model while keeping adapter-specific scope and version extraction behind adapter capabilities. The first slice is implemented in the generic exporter; the ChatGPT-specific exporter remains a separate compatibility surface until equivalent behavior is migrated and verified.
 
 ## Work Items
 
 - [x] TASK-001: Complete source-based Discovery and gap analysis.
 - [x] TASK-002: Specify target workflow and acceptance model.
 - [ ] TASK-003: Verify archived ChatGPT project metadata behavior.
-- [ ] TASK-004: Define adapter capability contract for scope, archive, version signal, and index refresh.
-- [ ] TASK-005: Implement workspace shell and logical list model in a future authorized Change.
+- [x] TASK-004: Define conservative adapter capability handling: show Scope/archive only when metadata fields exist; keep unknown content version as null.
+- [x] TASK-005: Implement generic workspace shell and logical list/selection model.
 - [ ] TASK-006: Implement export rail, confirmation, progress, cancellation, and retry integration in a future authorized Change.
 
 ## Risks
@@ -39,4 +39,4 @@ Keep CHG-0002 documentation-only. Future implementation must preserve the curren
 
 ## Stop Condition
 
-Plan completion is not Change completion. This Change is ready only for implementation planning; it does not authorize business-code edits.
+Plan completion is not Change completion. Remaining implementation slices and live acceptance still require evidence before closure.
