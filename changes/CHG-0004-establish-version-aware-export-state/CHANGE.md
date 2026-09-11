@@ -39,9 +39,13 @@ Confirmed: identity is `platform + conversationId`; title is display-only; curre
 
 ## Acceptance Criteria
 
-- [x] Discovery records source-confirmed signals and Unknowns.
-- [x] Specification defines version candidates, state transitions, unknown semantics, manifest, and migration.
-- [x] Implementation readiness is recorded without business-code changes.
+- [x] Capability-aware hybrid strategy with native precedence and deterministic fingerprint fallback.
+- [x] Four-state export model preserves Unknown and does not use title/version timestamps as content version.
+- [x] Legacy exported/pending data migrates additively without claiming Latest.
+- [x] Successful export records observed contentVersion in artifact and manifest.
+- [x] Same-version representations and artifact references merge without loss.
+- [x] Manifest/recovery core matches stable identity + contentVersion.
+- [x] Automated tests cover state transitions, migration, fingerprint, native precedence, pipeline, manifest, and recovery.
 
 ## Decisions
 
@@ -50,7 +54,8 @@ Confirmed: identity is `platform + conversationId`; title is display-only; curre
 
 ## Unknowns
 
-- Implementation may begin only after this READY Change is explicitly authorized.
+- ChatGPT native reliable content revision remains unavailable; derived fingerprint is used only when normalized content exists, otherwise Unknown.
+- Full ZIP/backup runtime, cache/incremental refresh, attachment binary download, and production UI remain outside this Change.
 
 ## Stop Condition
 
