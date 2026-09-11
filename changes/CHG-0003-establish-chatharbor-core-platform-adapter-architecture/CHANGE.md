@@ -1,0 +1,30 @@
+---
+id: CHG-0003
+title: Establish ChatHarbor Core + Platform Adapter Architecture
+type: architecture
+size: S3
+status: READY
+authority: human-owner
+created: 2026-09-11
+updated: '2026-09-11'
+---
+
+# CHG-0003 — Establish ChatHarbor Core + Platform Adapter Architecture
+
+## Why
+
+Human Decision DEC-0002 selects Extract & Recompose. Neither legacy script may remain the final product Core.
+
+## Scope
+
+This Change begins with Architecture Specification only. It defines boundaries, contracts, migration sequencing, risks, rollback, and acceptance evidence. It does not perform large-scale business-code migration.
+
+## Dependencies
+
+- CHG-0002 is blocked by CHG-0003.
+- DEC-0001 UX decisions remain authoritative.
+- DEC-0002 selects Option C.
+
+## Stop Condition
+
+CHG-0003 may leave READY only after its architecture specification is reviewed and implementation authorization is explicit. No Big Bang replacement is allowed.
