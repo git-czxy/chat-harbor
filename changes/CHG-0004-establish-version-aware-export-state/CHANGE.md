@@ -1,11 +1,12 @@
 ---
 id: CHG-0004
-title: "Establish Version-aware Export State"
+title: Establish Version-aware Export State
 type: refactor
 size: S2
-status: READY
+status: VERIFYING
 authority: human-owner
 created: 2026-09-12
+updated: '2026-09-12'
 ---
 
 # CHG-0004 — Establish Version-aware Export State
@@ -20,7 +21,7 @@ Confirmed: identity is `platform + conversationId`; title is display-only; curre
 
 ## Desired Behavior
 
-为 Core 定义可实现、保守且可迁移的 Content Version、Export State、Manifest 和恢复语义。本轮只完成 Discovery、Specification、Implementation Readiness。
+为 Core 定义并实现可迁移的 Content Version、Export State、Manifest 和恢复语义；未接入 UI、cache、附件下载或 batch runtime。
 
 ## Scope
 

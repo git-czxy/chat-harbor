@@ -2,10 +2,10 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 29
+state_version: 31
 current_objective:
   id: OBJ-001
-  title: 完成 CHG-0004 Version-aware Export State 的 Specification 与 Readiness。
+  title: 验证 CHG-0004 Version-aware Export State 实现。
 current_milestone:
   id: M0
   title: PDR Adoption / Baseline Reconstruction
@@ -18,8 +18,8 @@ active_work:
   status: BLOCKED
   summary: CHG-0002 的架构依赖已满足；当前仍暂停，等待单独授权恢复 UX 实施。
 - id: CHG-0004
-  status: READY
-  summary: 已完成版本信号 Discovery、Export State/Manifest Specification 和 Legacy migration readiness；未修改业务代码。
+  status: VERIFYING
+  summary: 已实现 version-aware strategy/state、Legacy additive migration 和 manifest schema；自动测试通过，等待 Review。
 blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
@@ -30,10 +30,8 @@ unknowns:
   refresh、backup/restore、batch/rate/pause、retry/cancel/progress、production UX 尚未验证。
 - ChatGPT 原生 reliable content revision 尚未确认；实现阶段必须保留 Unknown fallback。
 next_allowed:
-- explicitly authorize the next CHG-0002 UX implementation step or create a separate
-  scoped Change
+- review CHG-0004 implementation evidence before closure
 - keep unverified export, attachment, cache, and production UX capabilities as Unknown
-- explicitly authorize CHG-0004 implementation after reviewing its readiness package
 - verify GOV-001 provenance/license before public release
 prohibited:
 - treat historical plans as implementation evidence
