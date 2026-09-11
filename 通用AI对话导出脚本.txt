@@ -3143,7 +3143,7 @@
         endDate: "",
         scope: "all",
         archive: "unarchived",
-        sortBy: "updatedAt",
+        sortBy: "latest",
         pageSize: 50,
         visibleCount: 50,
         speedIndex: settings.speedIndex,
@@ -3166,7 +3166,7 @@
       });
       panel.innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div style="font-size:15px;font-weight:600">选择对话导出（${adapter.platform}）</div>
+          <div style="font-size:18px;font-weight:650">ChatHarbor · 对话工作区</div>
           <div data-role="status" style="color:#888;font-size:12px"></div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
@@ -3188,8 +3188,8 @@
           <span style="align-self:center">—</span>
           <input data-role="endDate" type="date" style="padding:5px;border:1px solid #ccc;border-radius:6px">
           <select data-role="sortBy">
-            <option value="updatedAt">时间排序</option>
-            <option value="title">标题排序</option>
+            <option value="latest">最新优先</option>
+            <option value="earliest">最早优先</option>
           </select>
         </div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
@@ -3239,8 +3239,45 @@
       Object.assign(main.style, { minWidth: "0", display: "flex", flexDirection: "column" });
       const rail = document.createElement("aside");
       Object.assign(rail.style, { border: "1px solid #eee", borderRadius: "8px", padding: "10px", display: "flex", flexDirection: "column", gap: "10px", background: "#fafafa" });
-      main.append(list, footer);
-      rail.append(strategy, records);
+      main.append(list);
+      rail.append(strategy, records, footer);
+      panel.style.overflow = "hidden";
+      workspace.style.overflow = "hidden";
+      list.style.minHeight = "0";
+      list.style.height = "100%";
+      rail.style.minWidth = "0";
+      rail.style.overflow = "auto";
+      const strategyDetails = document.createElement("details");
+      const strategySummary = document.createElement("summary");
+      strategySummary.textContent = "导出策略 · 调整 / 高级设置";
+      strategySummary.style.cursor = "pointer";
+      strategyDetails.append(strategySummary, ...Array.from(strategy.childNodes));
+      strategy.replaceChildren(strategyDetails);
+      const recordDetails = document.createElement("details");
+      const recordSummary = document.createElement("summary");
+      recordSummary.textContent = "导出记录";
+      recordSummary.style.cursor = "pointer";
+      recordDetails.append(recordSummary, ...Array.from(records.childNodes));
+      records.replaceChildren(recordDetails);
+      const selectionSummary = document.createElement("div");
+      selectionSummary.style.cssText = "padding:8px 0;font-weight:600;line-height:1.5;white-space:normal";
+      selectionSummary.innerHTML = '<div data-role="selectionSummary">已选 0 条</div><div data-role="matchSummary" style="font-weight:400;color:#666">匹配 0 / 总计 0</div>';
+      rail.insertBefore(selectionSummary, strategy);
+      rail.insertBefore(footer, strategy);
+      const timeDetails = document.createElement("details");
+      const timeSummary = document.createElement("summary");
+      timeSummary.textContent = "时间";
+      timeSummary.style.cursor = "pointer";
+      const timePreset = document.createElement("select");
+      timePreset.dataset.role = "timePreset";
+      timePreset.innerHTML = '<option value="all">不限</option><option value="7d">最近 7 天</option><option value="30d">最近 30 天</option><option value="custom">自定义</option>';
+      const timeBody = document.createElement("div");
+      timeBody.style.cssText = "display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0";
+      timeBody.append("依据", panel.querySelector('[data-role="timeField"]'), timePreset, "范围", panel.querySelector('[data-role="startDate"]'), "—", panel.querySelector('[data-role="endDate"]'), panel.querySelector('[data-role="sortBy"]'));
+      timeDetails.append(timeSummary, timeBody);
+      toolbar.append(timeDetails);
+      panel.querySelector('[data-role="scope"]').style.display = "";
+      panel.querySelector('[data-role="archive"]').style.display = "";
       workspace.append(main, rail);
       panel.replaceChildren(header, toolbar, workspace);
       overlay.appendChild(panel);
@@ -3249,6 +3286,8 @@
       const listEl = panel.querySelector('[data-role="list"]');
       const selCountEl = panel.querySelector('[data-role="selCount"]');
       const loadMoreBtn = panel.querySelector('[data-role="loadMore"]');
+      const selectionSummaryEl = panel.querySelector('[data-role="selectionSummary"]');
+      const matchSummaryEl = panel.querySelector('[data-role="matchSummary"]');
       let lastSelectedId = null;
 
       const fmtKeys = [
@@ -3289,11 +3328,11 @@
           }
           return true;
         });
-        if (state.sortBy === "title") {
-          state.filtered.sort((a, b) => String(a.title ?? "").localeCompare(String(b.title ?? "")));
-        } else {
-          state.filtered.sort((a, b) => String(b.updatedAt ?? b.createdAt ?? "").localeCompare(String(a.updatedAt ?? a.createdAt ?? "")));
-        }
+        state.filtered.sort((a, b) => {
+          const av = String(a.updatedAt ?? a.createdAt ?? "");
+          const bv = String(b.updatedAt ?? b.createdAt ?? "");
+          return state.sortBy === "earliest" ? av.localeCompare(bv) : bv.localeCompare(av);
+        });
         state.visibleCount = state.pageSize;
       }
 
@@ -3345,6 +3384,8 @@
 
       function updateSelCount() {
         selCountEl.textContent = `已选 ${state.selected.size} 条`;
+        selectionSummaryEl.textContent = `已选 ${state.selected.size} 条`;
+        matchSummaryEl.textContent = `匹配 ${state.filtered.length} / 总计 ${state.list.length}`;
       }
 
       async function loadAll() {
@@ -3397,6 +3438,17 @@
       panel.querySelector('[data-role="startDate"]').addEventListener("change", (e) => { state.startDate = e.target.value; applyFilters(); renderList(); });
       panel.querySelector('[data-role="endDate"]').addEventListener("change", (e) => { state.endDate = e.target.value; applyFilters(); renderList(); });
       panel.querySelector('[data-role="sortBy"]').addEventListener("change", (e) => { state.sortBy = e.target.value; applyFilters(); renderList(); });
+      panel.querySelector('[data-role="timePreset"]').addEventListener("change", (e) => {
+        state.timePreset = e.target.value;
+        const now = new Date();
+        const days = e.target.value === "7d" ? 7 : e.target.value === "30d" ? 30 : 0;
+        state.startDate = days ? new Date(now.getTime() - days * 86400000).toISOString().slice(0, 10) : "";
+        panel.querySelector('[data-role="startDate"]').value = state.startDate;
+        panel.querySelector('[data-role="endDate"]').value = "";
+        panel.querySelector('[data-role="startDate"]').style.display = e.target.value === "custom" ? "" : "none";
+        panel.querySelector('[data-role="endDate"]').style.display = e.target.value === "custom" ? "" : "none";
+        applyFilters(); renderList();
+      });
       panel.querySelector('[data-role="speed"]').addEventListener("change", (e) => { state.speedIndex = Number(e.target.value); });
       panel.querySelector('[data-role="maxBatch"]').addEventListener("input", (e) => { const v = Number(e.target.value); if (v >= 1) state.maxBatch = v; });
       panel.querySelector('[data-role="attachments"]').addEventListener("change", (e) => { state.includeAttachments = e.target.checked; });

@@ -10,7 +10,7 @@
 
 ## Current Work
 
-The ChatHarbor main entry is being connected to the new workspace; v0.4 is Legacy / Reference and will not be migrated.
+The ChatHarbor main entry and workspace information architecture have been corrected; v0.4 is Legacy / Reference and will not be migrated.
 
 ## Stop Condition
 

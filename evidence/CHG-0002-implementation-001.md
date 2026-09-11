@@ -36,3 +36,16 @@ Human Owner reported that the first live test still opened the legacy `Export co
 The main entry label is now `ChatHarbor`, with accessible label and tooltip `ChatHarbor · 导出对话`, and reuses the existing ChatGPT green `#10a37f` primary color. The v0.4 button and source remain unchanged as Legacy / Reference.
 
 This follow-up is statically validated only in this session; live verification is required to confirm the click opens the new workspace.
+
+## Spec Conformance Pass — 2026-09-11
+
+After live feedback showed visible deviations, the generic ChatHarbor workspace was corrected without adding new product capabilities:
+
+- Header now uses `ChatHarbor · 对话工作区` instead of exposing the platform key.
+- Scope and Archive controls are present in the toolbar; adapter-provided values remain authoritative.
+- Time controls are grouped under one collapsed `时间` control with field, range, and sort choices.
+- Strategy controls are under `导出策略 · 调整 / 高级设置`.
+- Export-history buttons are under one collapsed `导出记录` entry.
+- The primary export action is in the right rail; workspace/list/rail height is constrained with internal scrolling.
+
+Static result: PASS. Real rendering, overflow, and interaction after this pass remain Human Test Required.

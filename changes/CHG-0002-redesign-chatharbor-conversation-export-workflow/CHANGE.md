@@ -58,6 +58,10 @@ Implement a Desktop-first single main workspace: the conversation list is the pr
 - Content-version detection beyond `update_time` / platform timestamps is not established.
 - Real rendered performance and interaction behavior for a large list are not validated.
 
+## Latest Implementation Note
+
+The first live review found the new workspace visually non-conformant despite the main entry handoff. This pass corrected only the ChatHarbor generic workspace information architecture and viewport handling; the v0.4 migration remains superseded.
+
 ## Stop Condition
 
 This change is ready to close when all Acceptance Criteria have Evidence and required Human Acceptance is recorded.

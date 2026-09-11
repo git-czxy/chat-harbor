@@ -2,7 +2,7 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 18
+state_version: 20
 current_objective:
   id: OBJ-001
   title: 实施并验证 CHG-0002：逐步完成 ChatHarbor 对话导出工作流。
@@ -15,7 +15,7 @@ active_changes:
 active_work:
 - id: CHG-0002
   status: IMPLEMENTING
-  summary: ChatHarbor 主入口正在接管新工作区；v0.4 保留为 Legacy / Reference，不再迁移。
+  summary: ChatHarbor 主入口已接管工作区；本轮完成 Spec Conformance Pass，v0.4 保留为 Legacy / Reference，不再迁移。
 blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
