@@ -1,4 +1,5 @@
 import { conversationIdentity } from '../models/conversation.js';
+import { EXPORT_STATE_SCHEMA } from '../core/export-state.js';
 
 function messageText(message) {
   const content = message?.content;
@@ -15,6 +16,6 @@ export function toMarkdown(conversation) {
 
 export function exportConversation(conversation) {
   const identity = conversationIdentity(conversation);
-  const manifest = { identity, platform: conversation.platform, conversationId: conversation.conversationId, titleAtExport: conversation.title, contentVersion: conversation.contentVersion, exportedAt: new Date().toISOString(), representations: ['json', 'markdown'], attachmentManifest: conversation.attachments };
+  const manifest = { schemaVersion: EXPORT_STATE_SCHEMA, artifactVersion: 1, identity, platform: conversation.platform, conversationId: conversation.conversationId, titleAtExport: conversation.title, contentVersion: conversation.contentVersion, exportedAt: new Date().toISOString(), sourceUpdatedAt: conversation.updatedAt || null, representations: ['json', 'markdown'], attachmentManifest: conversation.attachments };
   return { identity, contentVersion: conversation.contentVersion, json: JSON.stringify({ ...conversation, identity }, null, 2), markdown: toMarkdown(conversation), manifest };
 }
