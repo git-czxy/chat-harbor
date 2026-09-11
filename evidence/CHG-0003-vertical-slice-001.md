@@ -11,6 +11,7 @@ ChatGPT Adapter -> normalized conversation model -> ChatHarbor Core index -> JSO
 - `ChatHarbor/core/index.js`: platform-neutral index/fetch boundary.
 - `ChatHarbor/export/pipeline.js`: two representations sharing identity/content version.
 - `ChatHarbor/test/vertical-slice.test.js`: executable contract checks.
+- `dist/ChatHarbor-Pilot.user.js`: self-contained test-only userscript browser wiring; it mirrors the source contracts because browser userscripts cannot import the repository ES modules directly.
 
 Legacy scripts were not modified or deleted. The adapter receives API access through injected list/fetch functions; browser API wiring remains a later integration step.
 
@@ -28,6 +29,10 @@ Legacy scripts were not modified or deleted. The adapter receives API access thr
 - Executable vertical-slice test: PASS (`vertical slice PASS`).
 - `git diff --check`: PASS.
 - PDR validate: PASS.
+
+## Browser integration status
+
+The installable pilot calls `/api/auth/session?unstable_client=true`, then `/backend-api/conversations?offset=0&limit=1&order=updated`, then `/backend-api/conversation/{id}`. It uses the new adapter normalization and export-pair semantics inside the single distributable, and never calls the legacy export entry or full-export workflow. It downloads exactly one JSON and one Markdown representation and logs the normalized model/manifest for inspection.
 
 ## Unknown / Human test
 

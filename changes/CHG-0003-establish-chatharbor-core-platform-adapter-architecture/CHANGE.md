@@ -17,7 +17,7 @@ Human Decision DEC-0002 selects Extract & Recompose. Neither legacy script may r
 
 ## Scope
 
-This Change began with Architecture Specification and now contains the first minimal implementation slice. It does not perform large-scale business-code migration.
+This Change began with Architecture Specification and now contains the first minimal implementation slice plus a test-only browser integration. `ChatHarbor/` is the source module boundary; `dist/ChatHarbor-Pilot.user.js` is the self-contained installable distributable for this pilot. It does not perform large-scale business-code migration.
 
 ## Dependencies
 
