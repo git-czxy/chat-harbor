@@ -34,6 +34,12 @@ Legacy scripts were not modified or deleted. The adapter receives API access thr
 
 The installable pilot calls `/api/auth/session?unstable_client=true`, then `/backend-api/conversations?offset=0&limit=1&order=updated`, then `/backend-api/conversation/{id}`. It uses the new adapter normalization and export-pair semantics inside the single distributable, and never calls the legacy export entry or full-export workflow. It downloads exactly one JSON and one Markdown representation and logs the normalized model/manifest for inspection.
 
+## Integration correction
+
+Human Browser Test found `mapping` payload messages were not reaching the normalized top-level `messages`. The ChatGPT adapter now selects the mapping root and traverses only reachable `children` in order; visible `user` and `assistant` nodes become canonical messages, while system/tool/hidden nodes remain in `rawSource`. Message id, parent id, timestamps, content type, text, and attachment metadata are retained. The installable pilot mirrors this correction.
+
+This is a correction of the existing slice, not a new migration slice. Browser retest is required.
+
 ## Unknown / Human test
 
 Live ChatGPT API/browser wiring, real payload coverage, attachment download, and browser end-to-end behavior remain Unknown/Human Test. This slice deliberately does not claim those validations.

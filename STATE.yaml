@@ -2,7 +2,7 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 25
+state_version: 26
 current_objective:
   id: OBJ-001
   title: 验证 CHG-0003 首个 ChatGPT 到 JSON/Markdown vertical slice。
@@ -19,7 +19,7 @@ active_work:
   summary: CHG-0002 保持 BLOCKED，依赖 CHG-0003 建立独立 ChatHarbor Core + Platform Adapters。
 - id: CHG-0003
   status: VERIFYING
-  summary: 已建立独立 Core/Adapter 边界并完成首个 ChatGPT→Normalized Model→JSON+Markdown slice；可安装 Browser Pilot 待实站验证。
+  summary: 已修复 ChatGPT mapping→normalized messages 缺陷并通过自动测试；等待 Browser Pilot 第二次实站验证。
 blocked:
 - CHG-0002: blocked by CHG-0003 until the recomposed Core is established.
 unknowns:
@@ -28,8 +28,9 @@ unknowns:
 - 是否存在除当前 Git 历史外的 Trae/工作树运行配置。
 - 用户对其他当前实现的最终验收状态。
 - ChatGPT 真实 API/browser wiring、附件下载和端到端页面行为尚未验证。
+- 首次实站发现的 mapping 消息归一化问题已修复，第二次实站结果未知。
 next_allowed:
-- perform limited Human Browser Pilot validation for CHG-0003
+- perform limited Human Browser Pilot retest for CHG-0003
 - keep CHG-0002 blocked until CHG-0003 establishes the Core boundary
 - verify GOV-001 provenance/license before public release
 prohibited:

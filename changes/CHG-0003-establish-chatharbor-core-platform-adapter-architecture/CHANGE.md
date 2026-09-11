@@ -19,6 +19,8 @@ Human Decision DEC-0002 selects Extract & Recompose. Neither legacy script may r
 
 This Change began with Architecture Specification and now contains the first minimal implementation slice plus a test-only browser integration. `ChatHarbor/` is the source module boundary; `dist/ChatHarbor-Pilot.user.js` is the self-contained installable distributable for this pilot. It does not perform large-scale business-code migration.
 
+The first Human Browser Test found a normalization defect in ChatGPT `mapping` traversal. This correction remains within the same vertical slice; the Change stays VERIFYING pending browser retest.
+
 ## Dependencies
 
 - CHG-0002 is blocked by CHG-0003.
