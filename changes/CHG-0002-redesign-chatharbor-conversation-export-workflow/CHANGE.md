@@ -68,7 +68,7 @@ The Change is intentionally paused after a real-site review exposed possible bas
 
 ## Dependency Update — 2026-09-11
 
-DEC-0002 now accepts Option C. CHG-0002 remains BLOCKED by CHG-0003; its confirmed UX Specification and Decisions remain valid and are applied after the recomposed Core is established.
+DEC-0002 now accepts Option C. Architecture dependency is resolved by CHG-0003, but CHG-0002 remains BLOCKED pending independent Human Resume Authorization; its confirmed UX Specification and Decisions remain valid.
 
 ## Stop Condition
 

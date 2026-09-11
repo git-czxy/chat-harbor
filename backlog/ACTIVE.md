@@ -6,7 +6,9 @@
 
 ## Active Change
 
-`CHG-0002` — Redesign ChatHarbor conversation export workflow (`VERIFYING`)
+`CHG-0002` — Redesign ChatHarbor conversation export workflow (`BLOCKED`)
+
+`CHG-0004` — Establish Version-aware Export State (`VERIFYING`)
 
 ## Current Work
 
@@ -18,7 +20,7 @@ CHG-0002 当前 Stop Condition：主入口接管和视觉/文案修复完成并�
 
 ## Blocked
 
-None.
+CHG-0002: architecture dependency resolved, but still waiting for independent Human Resume Authorization.
 
 ## Next Allowed
 

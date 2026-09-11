@@ -1,4 +1,6 @@
-# Implementation Readiness Plan — CHG-0004
+# Implementation / Remediation Plan — CHG-0004
+
+Historical note: the original readiness phase is complete; this file now records the implementation/remediation phase.
 
 ## Discovery
 
@@ -26,4 +28,4 @@ Keep legacy stores readable and untouched. New records are additive and schema-v
 - Legacy ID data is preserved and only proves prior export.
 - Manifest/recovery uses identity + contentVersion, not title/filename.
 - Attachment metadata and binary download remain separate.
-- Specification and evidence are complete; no business code is changed in this readiness phase.
+- Specification and implementation evidence are complete; this Change remains VERIFYING pending Human Acceptance.
