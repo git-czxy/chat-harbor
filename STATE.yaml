@@ -14,7 +14,7 @@ active_changes:
 - CHG-0002
 active_work:
 - id: CHG-0002
-  status: IMPLEMENTING
+  status: VERIFYING
   summary: ChatHarbor 主入口已接管工作区；本轮完成 Spec Conformance Pass，v0.4 保留为 Legacy / Reference，不再迁移。
 blocked: []
 unknowns:

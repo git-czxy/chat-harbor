@@ -6,7 +6,7 @@
 
 ## Active Change
 
-`CHG-0002` — Redesign ChatHarbor conversation export workflow (`IMPLEMENTING`)
+`CHG-0002` — Redesign ChatHarbor conversation export workflow (`VERIFYING`)
 
 ## Current Work
 
