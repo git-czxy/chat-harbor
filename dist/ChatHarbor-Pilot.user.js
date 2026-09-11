@@ -31,6 +31,16 @@
     c.identity = identity(c);
     return c;
   };
+  const extractChatGPTMessages = (raw) => {
+    const mapping = raw?.mapping;
+    if (!mapping || typeof mapping !== 'object') return Array.isArray(raw?.messages) ? raw.messages : [];
+    const ids = Object.keys(mapping); const root = mapping['client-created-root'] ? 'client-created-root' : ids.find(id => !mapping[id]?.parent) || ids[0];
+    const visited = new Set(); const messages = [];
+    const walk = (id) => { if (!id || visited.has(id) || !mapping[id]) return; visited.add(id); const node = mapping[id]; const msg = node.message; const role = msg?.author?.role; const hidden = msg?.metadata?.is_visually_hidden_from_conversation || msg?.metadata?.is_contextual_answers_system_message;
+      if (msg && (role === 'user' || role === 'assistant') && !hidden) { const parts = Array.isArray(msg.content?.parts) ? msg.content.parts : []; const content = parts.map(p => typeof p === 'string' ? p : p?.text || '').filter(Boolean).join('\n'); const attachments = (msg.metadata?.attachments || []).map(a => ({ id: a.id || a.file_id || a.asset_pointer || null, mimeType: a.mime_type || a.content_type || null, name: a.name || a.filename || null, size: a.size ?? null })); if (content || attachments.length) messages.push({ messageId: msg.id || id, parentId: node.parent || null, role, content, contentType: msg.content?.content_type || null, createdAt: msg.create_time || null, updatedAt: msg.update_time || null, attachments }); }
+      (node.children || []).forEach(walk); };
+    walk(root); return messages;
+  };
   const markdown = (c) => {
     const text = (m) => typeof m?.content === 'string' ? m.content : Array.isArray(m?.content?.parts) ? m.content.parts.join('\n') : JSON.stringify(m?.content || '');
     return [`# ${c.title || 'Untitled conversation'}`, '', `- Platform: ${c.platform}`, `- Conversation ID: ${c.conversationId}`, '', ...c.messages.flatMap(m => [`## ${m.author?.role || m.role || 'message'}`, '', text(m), ''])].join('\n');
@@ -66,7 +76,8 @@
       const r = await fetch(`/backend-api/conversation/${encodeURIComponent(id)}`, { headers: h });
       if (!r.ok) throw new Error(`Conversation fetch failed: ${r.status}`);
       const raw = await r.json();
-      return normalize(raw, { platform: 'chatgpt', conversationId: id });
+      const messages = extractChatGPTMessages(raw);
+      return normalize({ ...raw, messages, attachments: messages.flatMap(m => m.attachments) }, { platform: 'chatgpt', conversationId: id });
     }
   };
   const download = (name, content, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
