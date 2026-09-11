@@ -7,7 +7,8 @@ export function createExportState(identity) {
 export function deriveExportStatus(state) {
   if (!state.exportedVersions.length) return state.legacyExported ? 'unknown' : 'never_exported';
   if (state.currentObservedVersion == null) return 'unknown';
-  return state.exportedVersions.some(item => item.contentVersion === state.currentObservedVersion) ? 'latest' : 'has_updates';
+  if (state.exportedVersions.some(item => item.contentVersion === state.currentObservedVersion)) return 'latest';
+  return state.exportedVersions.some(item => item.contentVersion == null) ? 'unknown' : 'has_updates';
 }
 
 export function recordObservedVersion(state, version) {
@@ -17,9 +18,11 @@ export function recordObservedVersion(state, version) {
 
 export function recordSuccessfulExport(state, artifact) {
   const comparable = artifact.contentVersion != null;
+  if (!comparable && !artifact.artifactId) throw new Error('unknown-version artifacts require artifactId');
   const existing = state.exportedVersions.find(item => comparable ? item.contentVersion === artifact.contentVersion : item.artifactId && item.artifactId === artifact.artifactId);
   const merged = existing ? { ...existing, ...artifact, representations: [...new Set([...(existing.representations || []), ...(artifact.representations || [])])], artifactRefs: [...new Set([...(existing.artifactRefs || []), ...(artifact.artifactRefs || [])])] } : artifact;
-  const exportedVersions = existing ? state.exportedVersions.map(item => item.contentVersion === artifact.contentVersion ? merged : item) : [...state.exportedVersions, merged];
+  const sameArtifact = item => comparable ? item.contentVersion === artifact.contentVersion : item.artifactId && item.artifactId === artifact.artifactId;
+  const exportedVersions = existing ? state.exportedVersions.map(item => sameArtifact(item) ? merged : item) : [...state.exportedVersions, merged];
   const next = { ...state, exportedVersions, lastSuccessfulExport: artifact.exportedAt };
   return { ...next, status: deriveExportStatus(next) };
 }
@@ -32,6 +35,7 @@ export function migrateLegacyState(identity, legacy = {}) {
 }
 
 export function recoverArtifact(state, artifact) {
-  if (!artifact?.identity || artifact.identity !== state.identity || !artifact.artifactId) return state;
+  if (!artifact?.identity || artifact.identity !== state.identity) return state;
+  if (artifact.contentVersion == null && !artifact.artifactId) return state;
   return recordSuccessfulExport(state, artifact);
 }
