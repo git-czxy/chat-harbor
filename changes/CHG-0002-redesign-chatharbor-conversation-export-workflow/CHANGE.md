@@ -3,7 +3,7 @@ id: CHG-0002
 title: Redesign ChatHarbor conversation export workflow
 type: ux
 size: S2
-status: VERIFYING
+status: BLOCKED
 authority: human-owner
 created: 2026-09-11
 updated: '2026-09-11'
@@ -61,6 +61,10 @@ Implement a Desktop-first single main workspace: the conversation list is the pr
 ## Latest Implementation Note
 
 The first live review found the new workspace visually non-conformant despite the main entry handoff. This pass corrected only the ChatHarbor generic workspace information architecture and viewport handling; the v0.4 migration remains superseded.
+
+## Blocking Technical Spike — ARCH-001
+
+The Change is intentionally paused after a real-site review exposed possible base-architecture coupling between the generic implementation and the mature ChatGPT v0.4 implementation. A source-based comparison of both scripts and current ChatHarbor is recorded in `evidence/CHG-0002-ARCH-001-BASE-ARCHITECTURE-ASSESSMENT.md`. No business code was changed for this spike. `DEC-0002` records that the engineering recommendation is Option C, while the route remains Human Decision Required.
 
 ## Stop Condition
 

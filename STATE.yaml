@@ -2,10 +2,10 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 20
+state_version: 22
 current_objective:
   id: OBJ-001
-  title: 实施并验证 CHG-0002：逐步完成 ChatHarbor 对话导出工作流。
+  title: 完成 CHG-0002 架构评估并等待 Core 路线决策。
 current_milestone:
   id: M0
   title: PDR Adoption / Baseline Reconstruction
@@ -14,17 +14,18 @@ active_changes:
 - CHG-0002
 active_work:
 - id: CHG-0002
-  status: VERIFYING
-  summary: ChatHarbor 主入口已接管工作区；本轮完成 Spec Conformance Pass，v0.4 保留为 Legacy / Reference，不再迁移。
-blocked: []
+  status: BLOCKED
+  summary: CHG-0002 因 ARCH-001 Base Architecture Assessment 暂停；等待 Human Decision 选择 Core 路线。
+blocked:
+- ARCH-001: Base Architecture Assessment；需在恢复业务实施前选择 Option A/B/C。
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
 - 上游脚本 provenance、作者授权链和 license 兼容性。
 - 是否存在除当前 Git 历史外的 Trae/工作树运行配置。
 - 用户对其他当前实现的最终验收状态。
+- 当前应采用 Option A、B 还是 C 作为 ChatHarbor Core；工程建议已记录但尚未成为 Human Decision。
 next_allowed:
-- verify CHG-0002 implementation slice and remaining acceptance gaps
-- implement the next authorized vertical slice without changing closed UX decisions
+- record Human Decision for ARCH-001, then revise the affected CHG-0002 implementation plan
 - verify GOV-001 provenance/license before public release
 prohibited:
 - treat historical plans as implementation evidence
