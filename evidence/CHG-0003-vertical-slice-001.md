@@ -40,6 +40,10 @@ Human Browser Test found `mapping` payload messages were not reaching the normal
 
 This is a correction of the existing slice, not a new migration slice. Browser retest is required.
 
+## Human Browser Retest — PASS (2026-09-11)
+
+The Human verified the installable pilot on a real ChatGPT page: browser wiring, Adapter list/fetch, raw payload retention, normalized non-empty ordered messages, JSON export, Markdown export with正文, shared JSON/Markdown identity, and attachment metadata normalization all PASS. `contentVersion = null` was accepted; no fabricated version was used.
+
 ## Unknown / Human test
 
 Live ChatGPT API/browser wiring, real payload coverage, attachment download, and browser end-to-end behavior remain Unknown/Human Test. This slice deliberately does not claim those validations.
