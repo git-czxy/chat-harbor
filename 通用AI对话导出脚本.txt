@@ -1087,9 +1087,11 @@
       __publicField(this, "fetchImpl");
       __publicField(this, "language");
       __publicField(this, "explicitToken");
+      __publicField(this, "baseUrl");
       this.fetchImpl = options.fetchImpl ?? globalThis.fetch.bind(globalThis);
       this.language = options.language ?? "zh-CN";
       this.explicitToken = options.token;
+      this.baseUrl = options.baseUrl ?? "https://www.kimi.com/apiv2/";
     }
     resolveToken() {
       var _a2;
@@ -1102,7 +1104,7 @@
       return token;
     }
     async call(service, method, body) {
-      const response = await this.fetchImpl(`${BASE_URL}${service}/${method}`, {
+      const response = await this.fetchImpl(`${this.baseUrl}${service}/${method}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -1291,6 +1293,70 @@
       return toConversation(id, chat, messages);
     }
   }
+  // Kimi 国内版适配器（moonshot.cn 域名）。端点与国外版基址不同，待实测确认。
+  class KimiDomesticAdapter {
+    constructor(options = {}) {
+      __publicField(this, "platform", PLATFORM + "-cn");
+      __publicField(this, "client");
+      this.client = new KimiClient({ ...options, baseUrl: options.baseUrl ?? "https://kimi.moonshot.cn/apiv2/" });
+    }
+    detect() {
+      if (typeof location === "undefined") return false;
+      return /(^|\.)moonshot\.cn$/.test(location.hostname);
+    }
+    async *listConversations() {
+      // TODO(灰度): moonshot.cn 与 kimi.com 的 feed/chat 服务路径可能存在差异，需实测后调整。
+      let pageToken;
+      for (let page = 0; page < MAX_PAGES; page++) {
+        const response = await this.client.listFeeds({
+          page_size: DEFAULT_PAGE_SIZE,
+          filter_types: ["FEED_TYPE_CHAT", "FEED_TYPE_TASK"],
+          include_pinned: true,
+          ...pageToken ? { page_token: pageToken } : {}
+        });
+        const metas = parseFeeds(response);
+        for (const meta of metas) yield meta;
+        pageToken = response.nextPageToken;
+        if (!pageToken || metas.length === 0) break;
+      }
+    }
+    async fetchConversation(id) {
+      const [chat, messages] = await Promise.all([
+        this.client.getChat(id),
+        this.client.listMessages(id)
+      ]);
+      return toConversation(id, chat, messages);
+    }
+  }
+  // ======================== 灰度平台适配器（搭架，未实测） ========================
+  // 这些类仅在手动把 ALLOW_GRAYSCALE 打开、且访问对应站点时才会实例化。
+  // 检测用域名可识别宿主页；抓取方法为 TODO 桩，需结合真实页面/接口联调填充。
+  const GRAYSCALE_HOSTS = {
+    doubao: /(^|\.)(doubao|volcengine)\.(com|cn)$/,
+    qwen: /(^|\.)(chat\.qwen\.ai|tongyi\.aliyun\.com)$/,
+    yuanbao: /(^|\.)yuanbao\.tencent\.com$/
+  };
+  function makeGrayscaleAdapter(name, platform, hostRe) {
+    class GrayscalePlatformAdapter {
+      constructor() {
+        __publicField(this, "platform", platform);
+      }
+      detect() {
+        if (typeof location === "undefined") return false;
+        return hostRe.test(location.hostname);
+      }
+      async *listConversations() {
+        throw new Error(`${name} 适配器尚未完成实测，请等待后续版本支持（灰度）。`);
+      }
+      async fetchConversation(id) {
+        throw new Error(`${name} 适配器尚未完成实测，请等待后续版本支持（灰度）。`);
+      }
+    }
+    return GrayscalePlatformAdapter;
+  }
+  const DoubaoAdapter = makeGrayscaleAdapter("豆包", "doubao", GRAYSCALE_HOSTS.doubao);
+  const QwenAdapter = makeGrayscaleAdapter("千问", "qwen", GRAYSCALE_HOSTS.qwen);
+  const YuanbaoAdapter = makeGrayscaleAdapter("元宝", "yuanbao", GRAYSCALE_HOSTS.yuanbao);
   function slugify(input, fallback = "untitled") {
     const slug = input.normalize("NFKC").replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
     return slug || fallback;
@@ -1311,6 +1377,225 @@
       last = Date.now();
       return fn(...args);
     };
+  }
+  // ======================== 安全/去重/限速公共层（移植自 ChatGPT 超保守版 v0.4） ========================
+  // 防风控：6 档速度 + 随机抖动；两阶段本地去重（pending 待确认 / exported 已导出）实现续传与增量；
+  // 分批限速 + 批间长暂停 + 连续失败网络保护暂停；指数退避重试。数据纯本地，不离开浏览器。
+  const SPEED_LEVELS = [
+    { name: "1. 最快", base: 600, jitter: 400 },
+    { name: "2. 较快", base: 1500, jitter: 1000 },
+    { name: "3. 中等", base: 3000, jitter: 2000 },
+    { name: "4. 较慢（推荐）", base: 6000, jitter: 4000 },
+    { name: "5. 很慢", base: 9000, jitter: 6000 },
+    { name: "6. 最慢", base: 12000, jitter: 8000 }
+  ];
+  const MAX_EXPORT_PER_BATCH = 20;
+  const BATCH_PAUSE_MIN = 180; // 秒
+  const BATCH_PAUSE_MAX = 300; // 秒
+  const ALLOW_GRAYSCALE = false; // 灰度新平台开关：true 才启用未实测平台适配器
+
+  const SETTINGS_KEY = "ai_exporter_settings_v1";
+  const DEFAULT_SETTINGS = {
+    speedIndex: 3,
+    maxBatch: MAX_EXPORT_PER_BATCH,
+    batchPauseMin: BATCH_PAUSE_MIN,
+    batchPauseMax: BATCH_PAUSE_MAX,
+    includeAttachments: false,
+    format: {
+      outputFormat: "md",
+      includeReasoning: true,
+      includeSources: true,
+      includeAttachmentsManifest: true,
+      includeMetaHeader: true,
+      jsonPretty: true
+    }
+  };
+
+  function readJSON(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      return JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+  function writeJSON(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (err) {
+      console.warn(`[ai-chat-exporter] 存储写入失败（可能超出浏览器配额）：`, err);
+      alert("存储写入失败：可能超出浏览器配额，建议清理浏览器数据或导出去重历史备份后清空历史。");
+      return false;
+    }
+  }
+  function getSettings() {
+    const stored = readJSON(SETTINGS_KEY, {});
+    return {
+      speedIndex: Number.isInteger(stored.speedIndex) && stored.speedIndex >= 0 && stored.speedIndex < SPEED_LEVELS.length ? stored.speedIndex : DEFAULT_SETTINGS.speedIndex,
+      maxBatch: Number.isInteger(stored.maxBatch) && stored.maxBatch >= 1 ? stored.maxBatch : DEFAULT_SETTINGS.maxBatch,
+      batchPauseMin: Number.isFinite(stored.batchPauseMin) && stored.batchPauseMin >= 0 ? stored.batchPauseMin : DEFAULT_SETTINGS.batchPauseMin,
+      batchPauseMax: Number.isFinite(stored.batchPauseMax) && stored.batchPauseMax >= stored.batchPauseMin ? stored.batchPauseMax : DEFAULT_SETTINGS.batchPauseMax,
+      includeAttachments: typeof stored.includeAttachments === "boolean" ? stored.includeAttachments : DEFAULT_SETTINGS.includeAttachments,
+      format: Object.assign({}, DEFAULT_SETTINGS.format, stored.format || {})
+    };
+  }
+  function saveSettings(settings) {
+    writeJSON(SETTINGS_KEY, settings);
+  }
+
+  // 去重记录按平台命名空间隔离，key 带版本号便于升级
+  function exportedKey(platform) {
+    return `ai_exporter_exported_${platform}_v1`;
+  }
+  function pendingKey(platform) {
+    return `ai_exporter_pending_${platform}_v1`;
+  }
+  function readIdSet(key) {
+    const parsed = readJSON(key, []);
+    return new Set(Array.isArray(parsed) ? parsed : []);
+  }
+  function writeIdSet(key, set) {
+    writeJSON(key, Array.from(set));
+  }
+  function getExportedIds(platform) {
+    return readIdSet(exportedKey(platform));
+  }
+  function getPendingIds(platform) {
+    return readIdSet(pendingKey(platform));
+  }
+  function isAlreadyExported(id, platform) {
+    return getExportedIds(platform).has(id);
+  }
+  function isPendingExport(id, platform) {
+    return getPendingIds(platform).has(id);
+  }
+  function markConversationsPending(ids, platform) {
+    if (!ids || ids.length === 0) return;
+    const set = getPendingIds(platform);
+    let changed = false;
+    ids.forEach((id) => { if (!set.has(id)) { set.add(id); changed = true; } });
+    if (changed) writeIdSet(pendingKey(platform), set);
+  }
+  // 仅当对应批次 ZIP 确认下载成功后才把 pending 转为 exported，避免"没拿到文件"误记为已导出
+  function markConversationsExported(ids, platform) {
+    if (!ids || ids.length === 0) return;
+    const exported = getExportedIds(platform);
+    const pending = getPendingIds(platform);
+    let changed = false;
+    ids.forEach((id) => {
+      if (!exported.has(id)) { exported.add(id); changed = true; }
+      if (pending.delete(id)) changed = true;
+    });
+    if (changed) {
+      writeIdSet(exportedKey(platform), exported);
+      writeIdSet(pendingKey(platform), pending);
+    }
+  }
+  function clearExportHistory(platform) {
+    if (platform) {
+      localStorage.removeItem(exportedKey(platform));
+      localStorage.removeItem(pendingKey(platform));
+    } else {
+      Object.keys(localStorage).forEach((k) => {
+        if (k.startsWith("ai_exporter_exported_") || k.startsWith("ai_exporter_pending_")) {
+          localStorage.removeItem(k);
+        }
+      });
+    }
+  }
+
+  // 去重历史备份导出/导入：浏览器清理站点数据后可还原续传状态
+  function exportHistoryBackup(platform) {
+    const data = {
+      app: "ai-chat-exporter-history",
+      version: 2,
+      platform,
+      exportedAt: new Date().toISOString(),
+      exported: Array.from(getExportedIds(platform)),
+      pending: Array.from(getPendingIds(platform))
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    download(blob, `ai-chat-exporter-history_${platform}_${new Date().toISOString().slice(0, 10)}.json`);
+  }
+  function importHistoryBackup(file, platform) {
+    return new Promise((resolve) => {
+      if (!file) { resolve(false); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          if (!data || typeof data !== "object" || !Array.isArray(data.exported)) {
+            alert("备份文件格式无效：缺少 exported 字段。");
+            resolve(false);
+            return;
+          }
+          // 兼容无 platform 字段的 v1 备份：并入目标平台
+          const existingExported = getExportedIds(platform);
+          const existingPending = getPendingIds(platform);
+          (data.exported || []).forEach((id) => existingExported.add(id));
+          (data.pending || []).forEach((id) => {
+            existingPending.add(id);
+            existingExported.delete(id); // pending 优先于 exported
+          });
+          writeIdSet(exportedKey(platform), existingExported);
+          writeIdSet(pendingKey(platform), existingPending);
+          alert(`已导入去重历史：${data.exported.length} 条已导出、${(data.pending || []).length} 条待确认（与原记录合并）。`);
+          resolve(true);
+        } catch (err) {
+          console.error("[ai-chat-exporter] 导入去重历史失败", err);
+          alert("导入去重历史失败：文件不是有效的 JSON。");
+          resolve(false);
+        }
+      };
+      reader.onerror = () => { alert("读取备份文件失败。"); resolve(false); };
+      reader.readAsText(file);
+    });
+  }
+
+  // 分档速度 + 随机抖动（防风控核心）
+  function makeJitter(speedIndex) {
+    const speed = SPEED_LEVELS[speedIndex] ?? SPEED_LEVELS[DEFAULT_SETTINGS.speedIndex];
+    return () => speed.base + Math.random() * speed.jitter;
+  }
+  function makeBatchPauser(settings) {
+    const lo = Math.max(0, settings.batchPauseMin);
+    const hi = Math.max(lo, settings.batchPauseMax);
+    return () => (lo + Math.random() * (hi - lo)) * 1000;
+  }
+
+  // 指数退避重试：对 5xx/网络异常按 2^n*1000 ± 随机抖动退避，最多 retries 次；401/403 触发 onAuth 回调
+  async function withExponentialBackoff(fn, options = {}) {
+    const { retries = 3, label = "request", onAuth, onRetry } = options;
+    let attempt = 0;
+    for (;;) {
+      try {
+        return await fn();
+      } catch (err) {
+        attempt++;
+        const status = Number(err && err.status) || Number(err && err.statusCode) || 0;
+        if (status === 401 || status === 403) {
+          if (onAuth && attempt === 1) {
+            const refreshed = await onAuth();
+            if (refreshed) continue;
+          }
+          throw err;
+        }
+        if (attempt >= retries) throw err;
+        const backoff = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+        if (onRetry) onRetry(attempt, backoff, err);
+        await sleep(backoff);
+      }
+    }
+  }
+  async function fetchWithRetry(fn, options) {
+    const { retries = 3, label, onAuth, onRetry } = options || {};
+    return withExponentialBackoff(fn, { retries, label, onAuth, onRetry });
+  }
+  function buildBatchFilename(platform, selectionType, date, time, batchIndex, totalBatches) {
+    const base = `${platform}-export-${selectionType || "range"}-${date}-${time}`;
+    return totalBatches > 1 ? `${base}_batch${batchIndex}of${totalBatches}.zip` : `${base}.zip`;
   }
   const DEFAULT_ATTACHMENT_MAX_BYTES = 50 * 1024 * 1024;
   const EXTENSION_BY_MIME = {
@@ -1423,6 +1708,9 @@
     }
     return { files, saved, skipped };
   }
+  // 分批限速导出引擎：按 settings 切批，每批独立 ZipSink（防超大 zip 内存 OOM），
+  // 批间长暂停 + 连续失败网络保护暂停，指数退避重试，两阶段去重（pending->exported）。
+  // 单批时文件名不带 batch 后缀，保持原有体验；多批时产出 _batchXofY 多个 zip。
   async function exportConversations(options) {
     var _a2;
     const {
@@ -1430,69 +1718,174 @@
       exporters,
       ids,
       range,
-      throttleMs = 500,
       includeAttachments = false,
       attachmentMaxBytes,
       onFile,
+      onBatch,
       onProgress,
-      onError
+      onError,
+      onBatchPause,
+      onStatus,
+      shouldContinue = () => true,
+      speedIndex,
+      maxBatch = MAX_EXPORT_PER_BATCH
     } = options;
+    const settings = getSettings();
+    const runCfg = {
+      jitter: makeJitter(speedIndex ?? settings.speedIndex),
+      batch: Math.max(1, Number.isInteger(maxBatch) ? maxBatch : settings.maxBatch),
+      pause: makeBatchPauser(settings),
+      platform: adapter.platform,
+      retries: 3
+    };
+    const runJitter = () => runCfg.jitter();
+
+    // 1) 列表：range/ids 过滤
     const metas = [];
     const wanted = ids ? new Set(ids) : null;
     const from = Math.max(1, Math.floor((range == null ? void 0 : range.from) ?? 1));
     const to = Math.floor((range == null ? void 0 : range.to) ?? Infinity);
     let position = 0;
+    let dedupSkipped = 0;
     onProgress == null ? void 0 : onProgress({ phase: "list", completed: 0, total: 0 });
     for await (const meta of adapter.listConversations()) {
       if (wanted && !wanted.has(meta.id)) continue;
       position += 1;
       if (position < from) continue;
+      // 2) 去重：待确认/已导出跳过（仅当按选中 id 导出时不重复处理）
+      if (isAlreadyExported(meta.id, runCfg.platform) || isPendingExport(meta.id, runCfg.platform)) {
+        dedupSkipped += 1;
+        continue;
+      }
       metas.push(meta);
       onProgress == null ? void 0 : onProgress({ phase: "list", completed: 0, total: metas.length });
       if (position >= to) break;
     }
-    const fetchOne = throttled((id) => adapter.fetchConversation(id), throttleMs);
-    const files = [];
-    const conversations = [];
+    if (metas.length === 0) {
+      onProgress == null ? void 0 : onProgress({ phase: "done", completed: 0, total: 0, skipped: dedupSkipped });
+      return { files: [], conversations: [], failed: [], attachmentsSaved: 0, attachmentsSkipped: 0, batchedBlobs: [], dedupSkipped };
+    }
+
+    // 3) 自动分批
+    const batches = [];
+    for (let i = 0; i < metas.length; i += runCfg.batch) {
+      batches.push(metas.slice(i, i + runCfg.batch));
+    }
+    const totalBatches = batches.length;
+    const batchedBlobs = [];
     const failed = [];
     let attachmentsSaved = 0;
     let attachmentsSkipped = 0;
-    const emit = onFile ?? ((file) => files.push(file));
-    for (const meta of metas) {
-      onProgress == null ? void 0 : onProgress({ phase: "fetch", meta, completed: conversations.length, total: metas.length });
-      try {
-        const conversation = await fetchOne(meta.id);
-        if (includeAttachments && ((_a2 = conversation.attachments) == null ? void 0 : _a2.length)) {
-          onProgress == null ? void 0 : onProgress({ phase: "attachments", meta, completed: conversations.length, total: metas.length });
-          const downloaded = await downloadAttachments(conversation, adapter, {
-            maxBytes: attachmentMaxBytes,
-            throttleMs
-          });
-          for (const file of downloaded.files) emit(file);
-          attachmentsSaved += downloaded.saved;
-          attachmentsSkipped += downloaded.skipped;
+    let conversationsSaved = 0;
+    let consecutiveFails = 0;
+    const fetchOne = throttled((id) => adapter.fetchConversation(id), 0);
+
+    for (let b = 0; b < batches.length; b++) {
+      if (!shouldContinue()) break;
+      const batch = batches[b];
+      // 每批独立 ZipSink，批内文件统一收集后一次性 finish
+      const sink = new ZipSink();
+      const emit = (file) => sink.add(file);
+      const batchOkIds = [];
+      const batchFiles = [];
+
+      for (let i = 0; i < batch.length; i++) {
+        if (!shouldContinue()) break;
+        const meta = batch[i];
+        onProgress == null ? void 0 : onProgress({ phase: "fetch", meta, completed: conversationsSaved, total: metas.length, batchIndex: b + 1, totalBatches });
+        try {
+          const conversation = await fetchWithRetry(
+            () => fetchOne(meta.id),
+            {
+              retries: runCfg.retries,
+              label: `conversation ${meta.id}`,
+              onRetry: (attempt, backoff, err) => {
+                console.warn(`[ai-chat-exporter] 获取对话 ${meta.id} 第 ${attempt} 次失败，${Math.round(backoff / 1000)}s 后重试：`, err.message);
+                if (onStatus) onStatus(`⚠️ 重试中 ${attempt}/${runCfg.retries}（${Math.round(backoff / 1000)}s）…`);
+              }
+            }
+          );
+          let convFiles = [];
+          if (includeAttachments && ((_a2 = conversation.attachments) == null ? void 0 : _a2.length)) {
+            onProgress == null ? void 0 : onProgress({ phase: "attachments", meta, completed: conversationsSaved, total: metas.length, batchIndex: b + 1, totalBatches });
+            const downloaded = await downloadAttachments(conversation, adapter, {
+              maxBytes: attachmentMaxBytes,
+              throttleMs: runCfg.jitter() // 附件之间也用随机节流
+            });
+            convFiles = downloaded.files;
+            attachmentsSaved += downloaded.saved;
+            attachmentsSkipped += downloaded.skipped;
+          }
+          onProgress == null ? void 0 : onProgress({ phase: "export", meta, completed: conversationsSaved, total: metas.length, batchIndex: b + 1, totalBatches });
+          for (const exporter of exporters) {
+            const file = exporter.export(conversation);
+            if (file) emit(file);
+            batchFiles.push(file);
+          }
+          for (const file of convFiles) emit(file);
+          batchOkIds.push(meta.id);
+          conversationsSaved += 1;
+          consecutiveFails = 0;
+        } catch (error) {
+          consecutiveFails += 1;
+          failed.push(meta.id);
+          onError == null ? void 0 : onError(meta.id, error);
+          console.warn(`[ai-chat-exporter] 对话导出失败 [${meta.id}]:`, error.message);
+          // 连续失败触发网络保护暂停，时长随失败次数增长
+          if (consecutiveFails >= 3) {
+            const pauseSec = 120 * Math.min(consecutiveFails - 2, 5);
+            if (onStatus) onStatus(`⚠️ 连续失败 ${consecutiveFails} 条，暂停 ${pauseSec} 秒…`);
+            await sleep(pauseSec * 1000);
+            consecutiveFails = 0;
+          }
         }
-        conversations.push(conversation);
-        onProgress == null ? void 0 : onProgress({ phase: "export", meta, completed: conversations.length, total: metas.length });
-        for (const exporter of exporters) {
-          emit(exporter.export(conversation));
+        if (shouldContinue()) await sleep(runJitter());
+      }
+
+      // 本批打包下载：先记 pending，onBatch 确认下载成功后再转 exported
+      if (batchOkIds.length > 0 && shouldContinue()) {
+        markConversationsPending(batchOkIds, runCfg.platform);
+        const blob = await sink.finish();
+        const date = new Date().toISOString().slice(0, 10);
+        const time = new Date().toTimeString().slice(0, 5).replace(":", "");
+        const filename = buildBatchFilename(runCfg.platform, "selected", date, time, b + 1, totalBatches);
+        let downloaded = false;
+        if (onBatch) {
+          downloaded = await onBatch(blob, filename, { batchIndex: b + 1, totalBatches, okIds: batchOkIds });
+        } else {
+          // 兼容无 onBatch 时的回退：直接触发浏览器下载
+          if (typeof download === "function") {
+            download(blob, filename);
+            downloaded = true;
+          }
         }
-      } catch (error) {
-        failed.push(meta.id);
-        onError == null ? void 0 : onError(meta.id, error);
+        batchedBlobs.push({ name: filename, blob });
+        if (downloaded) {
+          markConversationsExported(batchOkIds, runCfg.platform);
+        }
+      }
+
+      // 批间长暂停（最后一个无批次暂停）
+      if (b < batches.length - 1 && shouldContinue()) {
+        const pauseMs = runCfg.pause();
+        if (onStatus) onStatus(`⏸️ 批次 ${b + 1}/${totalBatches} 完成，暂停 ${Math.round(pauseMs / 1000)} 秒后继续…`);
+        if (onBatchPause) await onBatchPause(pauseMs);
+        else await sleep(pauseMs);
       }
     }
-    onProgress == null ? void 0 : onProgress({ phase: "done", completed: conversations.length, total: metas.length });
-    return { files, conversations, failed, attachmentsSaved, attachmentsSkipped };
+
+    onProgress == null ? void 0 : onProgress({ phase: "done", completed: conversationsSaved, total: metas.length, skipped: dedupSkipped });
+    return { files: [], conversations: [], failed, attachmentsSaved, attachmentsSkipped, batchedBlobs, dedupSkipped, conversationsSaved };
   }
-  function jsonExporter() {
+  function jsonExporter(fmt = {}) {
+    const options = Object.assign({ jsonPretty: true }, fmt);
     return {
       id: "json",
       extension: "json",
       export(conversation) {
         return {
           path: `${conversation.platform}/json/${conversationBaseName(conversation)}.json`,
-          content: JSON.stringify(conversation, null, 2) + "\n",
+          content: JSON.stringify(conversation, null, options.jsonPretty ? 2 : 0) + "\n",
           mimeType: "application/json"
         };
       }
@@ -1535,15 +1928,16 @@
   }
   function renderMessage(message, context) {
     var _a2;
+    const fmt = context.format ?? {};
     const blocks = [];
-    if (message.reasoning) {
+    if (message.reasoning && fmt.includeReasoning !== false) {
       blocks.push(
         "<details><summary>💭 Reasoning</summary>\n\n" + message.reasoning.content + "\n\n</details>"
       );
     }
     const body = message.content.map((part) => renderPart(part, context)).join("\n\n");
     if (body) blocks.push(body);
-    if ((_a2 = message.citations) == null ? void 0 : _a2.length) {
+    if (fmt.includeSources !== false && (_a2 = message.citations) == null ? void 0 : _a2.length) {
       const items = message.citations.map((c, i) => {
         const label = c.title ?? c.url ?? `Source ${i + 1}`;
         return c.url ? `${i + 1}. [${label}](${c.url})` : `${i + 1}. ${label}`;
@@ -1553,7 +1947,7 @@
     if (!blocks.length) return null;
     return [`## ${ROLE_HEADING[message.role]}`, ...blocks].join("\n\n");
   }
-  function renderMarkdown(conversation) {
+  function renderMarkdown(conversation, fmt = {}) {
     var _a2;
     const metaBits = [
       `Platform: ${conversation.platform}`,
@@ -1561,16 +1955,17 @@
       conversation.updatedAt ? `Updated: ${conversation.updatedAt}` : null
     ].filter(Boolean);
     const parts = [`# ${conversation.title || conversation.id}`];
-    if (metaBits.length) parts.push(`> ${metaBits.join(" · ")}`);
+    if (fmt.includeMetaHeader !== false && metaBits.length) parts.push(`> ${metaBits.join(" · ")}`);
     const context = {
       platform: conversation.platform,
-      attachments: new Map((conversation.attachments ?? []).map((a) => [a.id, a]))
+      attachments: new Map((conversation.attachments ?? []).map((a) => [a.id, a])),
+      format: fmt
     };
     for (const message of conversation.messages) {
       const rendered = renderMessage(message, context);
       if (rendered) parts.push(rendered);
     }
-    if ((_a2 = conversation.attachments) == null ? void 0 : _a2.length) {
+    if (fmt.includeAttachmentsManifest !== false && (_a2 = conversation.attachments) == null ? void 0 : _a2.length) {
       const items = conversation.attachments.map((a) => {
         const label = a.name ?? a.id;
         const href = localHref(a, conversation.platform) ?? a.url;
@@ -1580,15 +1975,34 @@
     }
     return parts.join("\n\n") + "\n";
   }
-  function markdownExporter() {
+  // 轻量纯文本还原：去掉 md 标记，保留可读内容
+  function plainify(markdown) {
+    return markdown
+      .replace(/```[^\n]*\n([\s\S]*?)```/g, "$1")
+      .replace(/`([^`\n]+)`/g, "$1")
+      .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, "[图片: $1]")
+      .replace(/\[([^\]]+)\]\(([^)]*)\)/g, "$1")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/^\s*>\s?/gm, "")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/\*([^*\n]+)\*/g, "$1")
+      .replace(/^\s*[-*+]\s+/gm, "- ")
+      .replace(/^\s*(\d+)\.\s+/gm, "$1. ")
+      .replace(/^\s*\|[^\n]*\|\s*$/gm, "");
+  }
+  function markdownExporter(fmt = {}) {
+    const options = Object.assign({ outputFormat: "md" }, fmt);
+    const md = (conversation) => renderMarkdown(conversation, options);
     return {
       id: "markdown",
-      extension: "md",
+      extension: options.outputFormat === "txt" ? "txt" : "md",
       export(conversation) {
+        const content = options.outputFormat === "txt" ? plainify(md(conversation)) : md(conversation);
+        const dir = options.outputFormat === "txt" ? "text" : "markdown";
         return {
-          path: `${conversation.platform}/markdown/${conversationBaseName(conversation)}.md`,
-          content: renderMarkdown(conversation),
-          mimeType: "text/markdown"
+          path: `${conversation.platform}/${dir}/${conversationBaseName(conversation)}.${options.outputFormat === "txt" ? "txt" : "md"}`,
+          content,
+          mimeType: options.outputFormat === "txt" ? "text/plain" : "text/markdown"
         };
       }
     };
@@ -2509,51 +2923,72 @@
   }
   function describeProgress(p) {
     var _a2;
+    const batchTag = p.batchIndex ? ` [批次 ${p.batchIndex}/${p.totalBatches}]` : "";
     switch (p.phase) {
       case "list":
-        return `Listing conversations… (${p.total})`;
+        return `正在扫描对话列表…（${p.total}）${batchTag}`;
       case "fetch":
-        return `Fetching ${p.completed + 1}/${p.total}: ${((_a2 = p.meta) == null ? void 0 : _a2.title) ?? ""}`;
+        return `正在获取 ${p.completed + 1}/${p.total}：${((_a2 = p.meta) == null ? void 0 : _a2.title) ?? ""}${batchTag}`;
       case "attachments":
-        return `Downloading files ${p.completed + 1}/${p.total}…`;
+        return `正在下载附件 ${p.completed + 1}/${p.total}…${batchTag}`;
       case "export":
-        return `Exporting ${p.completed}/${p.total}…`;
+        return `正在导出 ${p.completed}/${p.total}…${batchTag}`;
       case "done":
-        return `Done — ${p.completed} conversations.`;
+        return `完成 — ${p.completed} 条对话${p.skipped ? `（跳过已导出 ${p.skipped} 条）` : ""}.`;
+      default:
+        return "";
     }
   }
   function resolveAdapter() {
-    const adapters = [
-      new KimiAdapter(),
-      new GeminiAdapter(),
-      new GrokAdapter(),
-      new DeepSeekAdapter(),
-      new ChatGPTAdapter()
-    ];
-    return adapters.find((adapter) => adapter.detect()) ?? null;
+    const grayscale = []
+      .concat(ALLOW_GRAYSCALE ? [new DoubaoAdapter(), new QwenAdapter(), new YuanbaoAdapter()] : [])
+      .concat([
+        new KimiDomesticAdapter(),
+        new KimiAdapter(),
+        new GeminiAdapter(),
+        new GrokAdapter(),
+        new DeepSeekAdapter(),
+        new ChatGPTAdapter()
+      ]);
+    return grayscale.find((adapter) => adapter.detect()) ?? null;
   }
   async function runExport(adapter, setStatus, choices) {
-    const sink = new ZipSink();
-    const { conversations, failed, attachmentsSaved, attachmentsSkipped } = await exportConversations({
+    const settings = getSettings();
+    let batched = 0;
+    const { failed, attachmentsSaved, attachmentsSkipped, batchedBlobs, dedupSkipped, conversationsSaved } = await exportConversations({
       adapter,
-      exporters: [markdownExporter(), jsonExporter()],
+      exporters: [markdownExporter(settings.format), jsonExporter(settings.format)],
+      ids: choices.ids,
       range: choices.range,
-      includeAttachments: choices.includeAttachments,
-      throttleMs: 500,
-      onFile: (file) => sink.add(file),
+      includeAttachments: choices.includeAttachments !== void 0 ? choices.includeAttachments : settings.includeAttachments,
+      onBatch: (blob, filename, meta) => {
+        download(blob, filename);
+        batched += 1;
+        setStatus(`⬇️ 正在保存 ${filename}（批次 ${meta.batchIndex}/${meta.totalBatches}）…`);
+        return true;
+      },
+      onBatchPause: (ms) => {
+        // 逐秒倒计时，显示批次暂停，同时保留取消能力由外层处理
+        setStatus(`⏸️ 批次间暂停，${Math.round(ms / 1000)} 秒后继续…`);
+      },
       onProgress: (p) => setStatus(describeProgress(p)),
+      onStatus: (text) => setStatus(text),
       onError: (id, error) => console.error("[ai-chat-exporter] failed", id, error)
     });
-    if (!conversations.length) {
-      setStatus("No conversations exported.");
+    if (!conversationsSaved) {
+      if (dedupSkipped > 0) {
+        setStatus(`无需导出：${dedupSkipped} 条均为已导出/待确认。`);
+      } else {
+        setStatus("没有可导出的对话。");
+      }
       return;
     }
-    const zip = await sink.finish();
-    download(zip, `${adapter.platform}-export-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}.zip`);
-    const bits = [`Saved ${conversations.length} conversations`];
-    if (attachmentsSaved) bits.push(`+${attachmentsSaved} files`);
-    if (attachmentsSkipped) bits.push(`${attachmentsSkipped} files skipped`);
-    if (failed.length) bits.push(`${failed.length} failed`);
+    const bits = [`保存 ${conversationsSaved} 条对话`];
+    if (batchedBlobs.length > 1) bits.push(`${batchedBlobs.length} 个分卷 zip`);
+    if (attachmentsSaved) bits.push(`+${attachmentsSaved} 个文件`);
+    if (attachmentsSkipped) bits.push(`${attachmentsSkipped} 个文件跳过`);
+    if (dedupSkipped) bits.push(`跳过已导出 ${dedupSkipped} 条`);
+    if (failed.length) bits.push(`${failed.length} 条失败`);
     setStatus(`${bits[0]}${bits.length > 1 ? ` (${bits.slice(1).join(", ")})` : ""}.`);
   }
   const countCache = /* @__PURE__ */ new Map();
@@ -2672,6 +3107,315 @@
       fromInput.focus();
     });
   }
+
+  // ======================== 选择列表 UI：筛选/排序/多选/二次确认/历史备份 ========================
+  // 取代 askChoices 成为主入口。返回 { ids?, includeAttachments, format }；未选中任何时 ids 为 undefined（导出全部）。
+  function showConversationPicker(adapter, onRun) {
+    return new Promise((resolve) => {
+      const settings = getSettings();
+      let loaded = false;
+      let loading = false;
+      const state = {
+        list: [],
+        filtered: [],
+        selected: new Set(),
+        query: "",
+        exportStatus: "all",
+        timeField: "updatedAt",
+        startDate: "",
+        endDate: "",
+        sortBy: "updatedAt",
+        pageSize: 50,
+        visibleCount: 50,
+        speedIndex: settings.speedIndex,
+        maxBatch: settings.maxBatch,
+        includeAttachments: settings.includeAttachments,
+        format: Object.assign({}, settings.format)
+      };
+
+      const overlay = document.createElement("div");
+      Object.assign(overlay.style, {
+        position: "fixed", inset: "0", zIndex: "100000",
+        background: "rgba(0,0,0,.4)", display: "flex", alignItems: "center", justifyContent: "center"
+      });
+      const panel = document.createElement("div");
+      Object.assign(panel.style, {
+        background: "#fff", color: "#111", colorScheme: "light", borderRadius: "12px",
+        padding: "18px 20px", width: "680px", maxWidth: "94vw", maxHeight: "88vh",
+        display: "flex", flexDirection: "column", fontSize: "13px",
+        fontFamily: "system-ui, sans-serif", boxShadow: "0 8px 30px rgba(0,0,0,.35)"
+      });
+      panel.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-size:15px;font-weight:600">选择对话导出（${adapter.platform}）</div>
+          <div data-role="status" style="color:#888;font-size:12px"></div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <input data-role="search" placeholder="按标题/ID 搜索…" style="flex:1;min-width:160px;padding:6px 8px;border:1px solid #ccc;border-radius:6px">
+          <select data-role="exportStatus">
+            <option value="all">全部</option>
+            <option value="exported">已导出</option>
+            <option value="unexported">未导出</option>
+          </select>
+          <select data-role="timeField">
+            <option value="updatedAt">按更新时间</option>
+            <option value="createdAt">按创建时间</option>
+          </select>
+          <input data-role="startDate" type="date" style="padding:5px;border:1px solid #ccc;border-radius:6px">
+          <span style="align-self:center">—</span>
+          <input data-role="endDate" type="date" style="padding:5px;border:1px solid #ccc;border-radius:6px">
+          <select data-role="sortBy">
+            <option value="updatedAt">时间排序</option>
+            <option value="title">标题排序</option>
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+          <label>速度：
+            <select data-role="speed">
+              ${SPEED_LEVELS.map((s, i) => `<option value="${i}" ${i === state.speedIndex ? "selected" : ""}>${s.name}</option>`).join("")}
+            </select>
+          </label>
+          <label>每批上限：
+            <input data-role="maxBatch" type="number" min="1" value="${state.maxBatch}" style="width:64px;padding:4px;border:1px solid #ccc;border-radius:6px">
+          </label>
+          <label style="display:flex;gap:4px;align-items:center"><input data-role="attachments" type="checkbox" ${state.includeAttachments ? "checked" : ""}>含附件</label>
+          <label style="display:flex;gap:4px;align-items:center"><input data-role="fmtReasoning" type="checkbox" ${state.format.includeReasoning ? "checked" : ""}>推理</label>
+          <label style="display:flex;gap:4px;align-items:center"><input data-role="fmtSources" type="checkbox" ${state.format.includeSources ? "checked" : ""}>来源</label>
+          <label style="display:flex;gap:4px;align-items:center"><input data-role="fmtManifest" type="checkbox" ${state.format.includeAttachmentsManifest ? "checked" : ""}>附件清单</label>
+          <label style="display:flex;gap:4px;align-items:center"><input data-role="fmtMeta" type="checkbox" ${state.format.includeMetaHeader ? "checked" : ""}>元数据头</label>
+          <label>格式：
+            <select data-role="fmtFormat">
+              <option value="md" ${state.format.outputFormat === "md" ? "selected" : ""}>Markdown</option>
+              <option value="txt" ${state.format.outputFormat === "txt" ? "selected" : ""}>纯文本</option>
+              <option value="json" ${state.format.outputFormat === "json" ? "selected" : ""}>JSON</option>
+            </select>
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <button data-role="selectAll" style="padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer">全选当前</button>
+          <button data-role="clearSel" style="padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer">清空选择</button>
+          <button data-role="selectUnexported" style="padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer">选未导出</button>
+          <span data-role="selCount" style="color:#666"></span>
+          <span style="flex:1"></span>
+          <button data-role="hisExport" style="padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer">导出历史</button>
+          <button data-role="hisImport" style="padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer">导入历史</button>
+          <button data-role="hisClear" style="padding:4px 10px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer">清空历史</button>
+        </div>
+        <div data-role="list" style="flex:1;min-height:220px;overflow:auto;border:1px solid #eee;border-radius:8px;margin-bottom:10px"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;align-items:center">
+          <button data-role="loadMore" style="padding:6px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;display:none">加载更多</button>
+          <span style="flex:1"></span>
+          <button data-role="cancel" style="padding:7px 14px;border-radius:8px;border:1px solid #ccc;background:#fff;color:#111;cursor:pointer">取消</button>
+          <button data-role="exportAll" style="padding:7px 14px;border-radius:8px;border:1px solid #333;background:#fff;color:#111;cursor:pointer">导出全部</button>
+          <button data-role="ok" style="padding:7px 14px;border-radius:8px;border:none;background:#111;color:#fff;cursor:pointer">导出选中</button>
+        </div>`;
+      overlay.appendChild(panel);
+
+      const statusEl = panel.querySelector('[data-role="status"]');
+      const listEl = panel.querySelector('[data-role="list"]');
+      const selCountEl = panel.querySelector('[data-role="selCount"]');
+      const loadMoreBtn = panel.querySelector('[data-role="loadMore"]');
+
+      const fmtKeys = [
+        ["fmtReasoning", "includeReasoning"],
+        ["fmtSources", "includeSources"],
+        ["fmtManifest", "includeAttachmentsManifest"],
+        ["fmtMeta", "includeMetaHeader"]
+      ];
+
+      function timeValue(item) {
+        const raw = item[state.timeField] ?? item.updatedAt ?? item.createdAt ?? "";
+        return typeof raw === "string" ? raw.slice(0, 10) : "";
+      }
+
+      function applyFilters() {
+        const q = state.query.trim().toLowerCase();
+        const exportedSet = getExportedIds(adapter.platform);
+        state.filtered = state.list.filter((item) => {
+          if (q && !`${item.title ?? ""} ${item.id ?? ""}`.toLowerCase().includes(q)) return false;
+          if (state.exportStatus === "exported" && !exportedSet.has(item.id)) return false;
+          if (state.exportStatus === "unexported" && (exportedSet.has(item.id) || state.selected.has(item.id))) {
+            // unexported: 跳过已导出；未导出的选中项也保留
+          }
+          if (state.startDate || state.endDate) {
+            const t = timeValue(item);
+            if (state.startDate && t < state.startDate) return false;
+            if (state.endDate && t > state.endDate) return false;
+          }
+          return true;
+        });
+        if (state.sortBy === "title") {
+          state.filtered.sort((a, b) => String(a.title ?? "").localeCompare(String(b.title ?? "")));
+        } else {
+          state.filtered.sort((a, b) => String(b.updatedAt ?? b.createdAt ?? "").localeCompare(String(a.updatedAt ?? a.createdAt ?? "")));
+        }
+        state.visibleCount = state.pageSize;
+      }
+
+      function fmtTime(item) {
+        const raw = item.updatedAt ?? item.createdAt ?? "";
+        return typeof raw === "string" ? raw.slice(0, 10) : "";
+      }
+
+      function renderList() {
+        const exportedSet = getExportedIds(adapter.platform);
+        const slice = state.filtered.slice(0, state.visibleCount);
+        listEl.innerHTML = "";
+        const FR = (s) => s.replace(/\{\{id\}\}/g, item.id);
+        slice.forEach((item) => {
+          const checked = state.selected.has(item.id) ? "checked" : "";
+          const isExp = exportedSet.has(item.id);
+          const row = document.createElement("label");
+          row.style.cssText = "display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid #f3f3f3;cursor:pointer";
+          row.innerHTML = `
+            <input type="checkbox" ${checked} style="margin:0;flex:none">
+            <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(item.title ?? "").replace(/"/g, "&quot;")}">${(item.title ?? "(未命名)").slice(0, 60)}</span>
+            <span style="color:#999;flex:none;font-size:12px">${fmtTime(item)}</span>
+            <span style="flex:none;font-size:11px;padding:1px 6px;border-radius:4px;${isExp ? "background:#e8f5e9;color:#2e7d32" : "background:#e3f2fd;color:#1565c0"}">${isExp ? "已导出" : "未导出"}</span>`;
+          const cb = row.querySelector("input");
+          cb.addEventListener("change", () => {
+            if (cb.checked) state.selected.add(item.id);
+            else state.selected.delete(item.id);
+            updateSelCount();
+          });
+          row.addEventListener("click", (e) => {
+            if (e.target === cb) return;
+            cb.checked = !cb.checked;
+            cb.dispatchEvent(new Event("change"));
+          });
+          listEl.appendChild(row);
+        });
+        loadMoreBtn.style.display = state.filtered.length > state.visibleCount ? "block" : "none";
+      }
+
+      function updateSelCount() {
+        selCountEl.textContent = `已选 ${state.selected.size} 条`;
+      }
+
+      async function loadAll() {
+        if (loading || loaded) return;
+        loading = true;
+        statusEl.textContent = "正在加载对话列表…";
+        const cache = new Map();
+        try {
+          for await (const meta of adapter.listConversations()) {
+            state.list.push(meta);
+          }
+          loaded = true;
+          statusEl.textContent = `共 ${state.list.length} 条对话`;
+          applyFilters();
+          renderList();
+        } catch (err) {
+          console.error("[ai-chat-exporter] 列表加载失败", err);
+          statusEl.textContent = "列表加载失败，请查看控制台";
+        } finally {
+          loading = false;
+        }
+      }
+
+      function currentChoices() {
+        const fmt = {
+          includeReasoning: state.format.includeReasoning,
+          includeSources: state.format.includeSources,
+          includeAttachmentsManifest: state.format.includeAttachmentsManifest,
+          includeMetaHeader: state.format.includeMetaHeader,
+          outputFormat: state.format.outputFormat,
+          jsonPretty: true
+        };
+        const def = state.selected.size > 0 ? Array.from(state.selected) : undefined;
+        return { ids: def, includeAttachments: state.includeAttachments, format: fmt };
+      }
+
+      // 事件绑定
+      const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+      panel.querySelector('[data-role="search"]').addEventListener("input", debounce((e) => { state.query = e.target.value; applyFilters(); renderList(); }, 200));
+      panel.querySelector('[data-role="exportStatus"]').addEventListener("change", (e) => { state.exportStatus = e.target.value; applyFilters(); renderList(); });
+      panel.querySelector('[data-role="timeField"]').addEventListener("change", (e) => { state.timeField = e.target.value; applyFilters(); renderList(); });
+      panel.querySelector('[data-role="startDate"]').addEventListener("change", (e) => { state.startDate = e.target.value; applyFilters(); renderList(); });
+      panel.querySelector('[data-role="endDate"]').addEventListener("change", (e) => { state.endDate = e.target.value; applyFilters(); renderList(); });
+      panel.querySelector('[data-role="sortBy"]').addEventListener("change", (e) => { state.sortBy = e.target.value; applyFilters(); renderList(); });
+      panel.querySelector('[data-role="speed"]').addEventListener("change", (e) => { state.speedIndex = Number(e.target.value); });
+      panel.querySelector('[data-role="maxBatch"]').addEventListener("input", (e) => { const v = Number(e.target.value); if (v >= 1) state.maxBatch = v; });
+      panel.querySelector('[data-role="attachments"]').addEventListener("change", (e) => { state.includeAttachments = e.target.checked; });
+      fmtKeys.forEach(([sel, key]) => {
+        panel.querySelector(`[data-role="${sel}"]`).addEventListener("change", (e) => { state.format[key] = e.target.checked; });
+      });
+      panel.querySelector('[data-role="fmtFormat"]').addEventListener("change", (e) => { state.format.outputFormat = e.target.value; });
+
+      panel.querySelector('[data-role="selectAll"]').addEventListener("click", () => {
+        state.filtered.slice(0, state.visibleCount).forEach((m) => state.selected.add(m.id));
+        renderList(); updateSelCount();
+      });
+      panel.querySelector('[data-role="clearSel"]').addEventListener("click", () => {
+        state.selected.clear(); renderList(); updateSelCount();
+      });
+      panel.querySelector('[data-role="selectUnexported"]').addEventListener("click", () => {
+        const exportedSet = getExportedIds(adapter.platform);
+        state.list.forEach((m) => { if (!exportedSet.has(m.id)) state.selected.add(m.id); });
+        renderList(); updateSelCount();
+      });
+
+      panel.querySelector('[data-role="hisExport"]').addEventListener("click", () => exportHistoryBackup(adapter.platform));
+      panel.querySelector('[data-role="hisImport"]').addEventListener("click", () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json,application/json";
+        input.onchange = async () => {
+          if (input.files && input.files[0]) {
+            await importHistoryBackup(input.files[0], adapter.platform);
+            applyFilters(); renderList(); updateSelCount();
+          }
+        };
+        input.click();
+      });
+      panel.querySelector('[data-role="hisClear"]').addEventListener("click", () => {
+        if (confirm("确认真要清空当前平台的去重历史吗？仅清除记忆，不删除任何导出文件。")) {
+          clearExportHistory(adapter.platform);
+          applyFilters(); renderList(); updateSelCount();
+        }
+      });
+
+      panel.querySelector('[data-role="loadMore"]').addEventListener("click", () => {
+        state.visibleCount += state.pageSize;
+        renderList();
+      });
+      panel.querySelector('[data-role="cancel"]').addEventListener("click", () => { overlay.remove(); resolve(null); });
+      overlay.addEventListener("click", (e) => { if (e.target === overlay) { overlay.remove(); resolve(null); } });
+      panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { overlay.remove(); resolve(null); } });
+
+      const confirmRun = (ids) => {
+        if (!ids || ids.length === 0) ids = undefined; // 未选则导出全部
+        const total = ids ? ids.length : state.list.length;
+        const batches = Math.max(1, Math.ceil((ids ? ids.length : state.list.filter((m) => !isAlreadyExported(m.id, adapter.platform)).length) / state.maxBatch));
+        const msg = ids
+          ? `已选 ${ids.length} 条，将分 ${batches} 批导出（每批最多 ${state.maxBatch} 条，批间自动暂停）。继续？`
+          : `将导出全部 ${total} 条对话（按 ${state.maxBatch} 条/批分 ${batches} 批，跳过已导出，批间自动暂停）。继续？`;
+        if (!confirm(msg)) return;
+        // 持久化本次设置
+        saveSettings(Object.assign(getSettings(), {
+          speedIndex: state.speedIndex,
+          maxBatch: state.maxBatch,
+          includeAttachments: state.includeAttachments,
+          format: state.format
+        }));
+        overlay.remove();
+        onRun(currentChoices());
+        resolve(currentChoices());
+      };
+      panel.querySelector('[data-role="ok"]').addEventListener("click", () => {
+        if (state.selected.size === 0) {
+          statusEl.textContent = "请先勾选要导出的对话，或点「导出全部」";
+          return;
+        }
+        confirmRun(Array.from(state.selected));
+      });
+      panel.querySelector('[data-role="exportAll"]').addEventListener("click", () => confirmRun(undefined));
+
+      document.body.appendChild(overlay);
+      loadAll();
+    });
+  }
+
   function mountButton() {
     const button = document.createElement("button");
     button.textContent = "Export all chats";

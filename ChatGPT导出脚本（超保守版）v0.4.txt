@@ -340,7 +340,7 @@
             'alert.noProjectConversations': 'No project-space conversations found.',
             'alert.projectExportFailed': 'Project-space export failed: {message}',
             'alert.invalidWorkspaceId': 'Choose or enter a valid Team Workspace ID.',
-            'alert.batchLimit': 'Selected {total} conversations, exceeds limit {limit}.\nOnly export first {limit}?',
+            'alert.batchLimit': 'Selected {total} conversations, exceeds per-batch limit {limit}.\nWill export all in {batches} batches. Continue?',
             'alert.allExported': 'All selected conversations have already been exported.',
             'alert.noSelection': 'No conversations selected.',
             'alert.exportCancelled': 'Export cancelled. Batches already downloaded are marked as exported; the rest can be resumed later.',
@@ -458,7 +458,7 @@
             'alert.noProjectConversations': '未找到项目空间对话。',
             'alert.projectExportFailed': '导出项目空间失败: {message}',
             'alert.invalidWorkspaceId': '请选择或输入一个有效的 Team Workspace ID！',
-            'alert.batchLimit': '当前待导出 {total} 条，超过单次上限 {limit} 条。\n是否只导出前 {limit} 条？',
+            'alert.batchLimit': '当前待导出 {total} 条，超过单次上限 {limit} 条。\n将按上限拆分为 {batches} 批全部导出，是否继续？',
             'alert.allExported': '选中的对话全部已经导出过了，无需重复下载。',
             'alert.noSelection': '未选中任何对话。',
             'alert.exportCancelled': '已取消导出。已下载完成的批次会计入已导出记录，其余可稍后续传。',
@@ -2257,10 +2257,10 @@
             };
             exportBtn.onclick = async () => {
                 if (state.selected.size === 0) return;
-                let selectedList = state.list.filter(item => state.selected.has(item.id));
+                const selectedList = state.list.filter(item => state.selected.has(item.id));
                 if (selectedList.length > MAX_EXPORT_PER_BATCH) {
-                    if (!confirm(t('alert.batchLimit', { total: selectedList.length, limit: MAX_EXPORT_PER_BATCH }))) return;
-                    selectedList = selectedList.slice(0, MAX_EXPORT_PER_BATCH);
+                    const batches = Math.ceil(selectedList.length / MAX_EXPORT_PER_BATCH);
+                    if (!confirm(t('alert.batchLimit', { total: selectedList.length, limit: MAX_EXPORT_PER_BATCH, batches }))) return;
                 }
                 closeDialog();
                 await startSelectiveExportProcess(mode, workspaceId, selectedList);
