@@ -22,6 +22,14 @@ export function buildSelectedExecutionTargets(selectedIds, conversations) {
   return resolved.map(conversation => conversation.conversationId);
 }
 
+export function buildFailedExecutionTargets(failures, targets) {
+  const byIdentity = new Map((targets || []).map(target => [target.identity, target]));
+  const identities = [...new Set((failures || []).map(failure => failure?.identity).filter(Boolean))];
+  const resolved = identities.map(identity => byIdentity.get(identity));
+  if (resolved.some(target => !target)) throw new Error('Failed conversation identity could not be resolved');
+  return resolved;
+}
+
 export function shouldSkipLatest(state, { skipLatest = true } = {}) {
   return Boolean(skipLatest && deriveExportStatus(state) === 'latest');
 }

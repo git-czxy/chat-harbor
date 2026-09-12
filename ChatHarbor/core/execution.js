@@ -11,8 +11,8 @@ export function createExecutionController(targets, execute, { onUpdate = () => {
       for (let index = 0; index < targets.length; index++) {
         if (state.cancelRequested) break;
         const target = targets[index]; state.currentIndex = index + 1; state.currentIdentity = target.identity; update();
-        try { await execute(target); state.success++; }
-        catch (error) { state.failed++; state.failures.push({ identity: target.identity, error: String(error?.message || error) }); }
+        try { await execute(target, { isCancelRequested: () => state.cancelRequested }); state.success++; }
+        catch (error) { state.failed++; state.failures.push({ identity: target.identity, error: String(error?.message || error), status: Number.isInteger(error?.status) ? error.status : null }); }
         state.completed++; update();
       }
       state.currentIdentity = null;

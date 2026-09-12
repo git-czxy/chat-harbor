@@ -26,7 +26,7 @@ export function extractChatGPTMessages(raw) {
   return messages;
 }
 
-export function createChatGPTAdapter({ list, fetch }) {
+export function createChatGPTAdapter({ list, fetch, refreshAuth } = {}) {
   return {
     platform: 'chatgpt',
     capabilities: {
@@ -38,6 +38,7 @@ export function createChatGPTAdapter({ list, fetch }) {
       contentRevision: false
     },
     async detect() { return typeof list === 'function' && typeof fetch === 'function'; },
+    async refreshAuth() { return typeof refreshAuth === 'function' ? Boolean(await refreshAuth()) : false; },
     async listConversations(options = {}) {
       const rows = await list(options);
       return rows.map(raw => normalizeConversation(raw, {
