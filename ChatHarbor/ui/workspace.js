@@ -10,6 +10,11 @@ export const WORKSPACE_LAYOUT = Object.freeze({
   action: { marginTop: 'auto' }
 });
 
+export function executionControls(selectedCount, status = 'idle') {
+  const active = status === 'running' || status === 'cancelling';
+  return { active, exportEnabled: selectedCount > 0 && !active, selectionEnabled: !active, closeEnabled: !active };
+}
+
 export function createWorkspaceModel({ conversations = [], capabilities = {}, selectedIds = new Set(), strategy = '当前速度', batchCount = 1, skipLatest = false } = {}) {
   const selected = preserveSelection(selectedIds, conversations.map(c => c.identity));
   return {
