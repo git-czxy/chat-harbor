@@ -3,7 +3,7 @@ id: CHG-0002
 title: Redesign ChatHarbor conversation export workflow
 type: ux
 size: S2
-status: BLOCKED
+status: IMPLEMENTING
 authority: human-owner
 created: 2026-09-11
 updated: '2026-09-11'
@@ -19,7 +19,7 @@ The current exporters expose platform-specific dialogs and controls rather than 
 
 Confirmed from source: the generic script uses a fixed floating entry button and a single overlay picker with search, export-status, time-field/date inputs, sorting, selection, format/attachment/strategy controls, and a rendered subset of the filtered list. The ChatGPT v0.4 script has a separate fixed entry button, an initial space-selection dialog, then a picker with scope, archive, export-status and time filters; it uses cached snapshots and a first-page `(id, update_time)` fingerprint for incremental refresh. Controls and state are duplicated between scripts and are not a shared Desktop-first main page.
 
-The exact live behavior and cross-script visual parity are not re-tested in this Change because the requested scope is Discovery, Specification, and Readiness only.
+The initial workspace and entry handoff have real-site evidence. Remaining workflow integration is being implemented incrementally under Option C; this pass is limited to export rail and explicit confirmation.
 
 ## Desired Behavior
 
@@ -29,12 +29,11 @@ Implement a Desktop-first single main workspace: the conversation list is the pr
 
 ### In
 
-- Produce an implementation-ready specification and plan for the closed Human Decisions.
-- Preserve current export behavior while introducing the target workflow in a later implementation Change phase.
+- Implement the confirmed Desktop-first workspace workflow in incremental slices.
+- Preserve current export capabilities while routing the new workflow through ChatHarbor Core/Adapters.
 
 ### Out
 
-- No business-code implementation in this Change.
 - No GOV-001 provenance/license work.
 - No reopening or redesigning the closed product decisions.
 
@@ -50,7 +49,9 @@ Implement a Desktop-first single main workspace: the conversation list is the pr
 ## Decisions
 
 - `DEC-0001` records the Human Decisions supplied for this Change.
-- No new product decision is required by the current technical analysis; implementation may proceed only after reviewing the plan and resolving listed Unknowns where they affect correctness.
+- DEC-0002 Option C is authoritative: ChatHarbor Core + Platform Adapters.
+- ChatGPT v0.4 and the original generic exporter remain Legacy / Reference Sources.
+- Human Resume Authorization was received on 2026-09-12; no new architecture decision is required.
 
 ## Unknowns
 
@@ -73,3 +74,7 @@ DEC-0002 now accepts Option C. Architecture dependency is resolved by CHG-0003, 
 ## Stop Condition
 
 This change is ready to close when all Acceptance Criteria have Evidence and required Human Acceptance is recorded.
+
+## Current Slice — Export Rail + Explicit Confirmation
+
+This slice is complete only when selected export is explicit, zero selection is disabled, confirmation fields are tested, and the four-state/Unknown semantics remain conservative. Progress, cancel, retry, cache, attachment download, and other later slices remain open.

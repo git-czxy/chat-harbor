@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-无已授权实施任务；等待 Human Gate。
+CHG-0002 Export Rail + Explicit Confirmation slice。
 
 ## Active Change
 
@@ -19,10 +19,10 @@
 
 ## Blocked
 
-CHG-0002: architecture dependency resolved, but still waiting for independent Human Resume Authorization.
+无当前阻塞；CHG-0002 architecture dependency resolved and Human Resume Authorization received。
 
 ## Next Allowed
 
-- CHG-0002 remains BLOCKED until independent Human Resume Authorization.
-- New implementation requires a scoped Change and Human Gate.
+- Verify the current CHG-0002 slice, then wait for independent Review.
+- Do not begin later progress/cancel/retry/cache/attachment slices in this turn.
 - 可独立开展 source / license provenance 核验；公开发布前必须保留证据并经过 Human Gate。

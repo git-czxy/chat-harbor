@@ -2,30 +2,31 @@
 
 ## Objective
 
-Turn the closed UX decisions into an implementation-ready work package without changing business code in CHG-0002.
+Continue CHG-0002 incrementally on the established ChatHarbor Core + Platform Adapters architecture.
 
-## Blocking Technical Spike — ARCH-001
+## Historical / Superseded Architecture Context
 
 On 2026-09-11, implementation is paused pending a Base Architecture Assessment. The source comparison, capability matrix, migration costs, and recommendation are recorded in `evidence/CHG-0002-ARCH-001-BASE-ARCHITECTURE-ASSESSMENT.md`; the route selection is recorded as decision-required in `decisions/DEC-0002-base-architecture-assessment.md`.
 
-No UI or business-code work may continue until a Human Decision selects Option A, B, or C. This spike does not reopen DEC-0001. TASK-007 remains superseded: migration of the new workspace back into ChatGPT v0.4 is not required; v0.4 remains Legacy / Reference.
+DEC-0002 has accepted Option C. This historical spike is closed; TASK-007 remains superseded and no migration back to v0.4 is required.
 
 ## Current Baseline
 
-The generic script is the ChatHarbor primary implementation. ChatGPT v0.4 additionally has list snapshots, first-page `(id, update_time)` fingerprints, project-space listing, localStorage exported/pending state, and a separate picker; it is now Legacy / Reference only. These are source-confirmed; live completeness and content-version correctness are not.
+ChatHarbor Core + Platform Adapters is the current architecture. The generic script and ChatGPT v0.4 are Legacy / Reference Sources. CHG-0004 version-aware export state is the current contract baseline.
 
 ## Approach
 
-Implement in vertical slices around a logical conversation-index model while keeping adapter-specific scope and version extraction behind adapter capabilities. The first slice is implemented in the generic exporter; the ChatGPT-specific exporter remains a separate compatibility surface until equivalent behavior is migrated and verified.
+Implement in vertical slices around the Core/Adapter boundary. Do not route new product behavior through legacy UI or old full-export dialogs.
 
 ## Work Items
 
 - [x] TASK-001: Complete source-based Discovery and gap analysis.
 - [x] TASK-002: Specify target workflow and acceptance model.
-- [ ] TASK-003: Verify archived ChatGPT project metadata behavior for ChatHarbor's ChatGPT adapter.
+- [ ] TASK-003: Record archived ChatGPT project metadata as source-confirmed/partial/unknown; do not block this slice unless required for correctness.
 - [x] TASK-004: Define conservative adapter capability handling: show Scope/archive only when metadata fields exist; keep unknown content version as null.
 - [x] TASK-005: Implement generic workspace shell and logical list/selection model.
-- [ ] TASK-006: Implement remaining export rail, confirmation, progress, cancellation, and retry integration in ChatHarbor.
+- [x] TASK-006A: Implement minimum export rail and explicit selected-export confirmation.
+- [ ] TASK-006B: Implement progress, cancellation, and retry integration.
 - [x] TASK-007: Supersede migration of the new workspace into ChatGPT v0.4; retain v0.4 as Legacy / Reference.
 
 ## Risks
@@ -48,4 +49,4 @@ Keep ChatGPT v0.4 unchanged as Legacy / Reference. Future ChatHarbor implementat
 
 Plan completion is not Change completion. Remaining implementation slices and live acceptance still require evidence before closure.
 
-Current stop condition: remain BLOCKED until the architecture route is selected; then revise only the affected implementation plan before resuming.
+Current stop condition: verify TASK-006A with automated evidence and limited runtime evidence; keep later workflow slices out of scope.
