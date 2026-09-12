@@ -8,7 +8,7 @@ import { exportConversation } from '../export/pipeline.js';
 import { createExportState, recordObservedVersion, recordSuccessfulExport, migrateLegacyState, recoverArtifact } from '../core/export-state.js';
 import { fingerprintContent, observeContentVersion } from '../core/versioning.js';
 import { buildExportConfirmation, buildSelectedExportRequest, buildSelectedExecutionTargets, preserveSelection, shouldSkipLatest, capabilityControls, resolveSelectedConversations } from '../core/workflow.js';
-import { createWorkspaceModel } from '../ui/workspace.js';
+import { createWorkspaceModel, WORKSPACE_LAYOUT } from '../ui/workspace.js';
 
 const raw = { id: 'conv-1', title: 'Original', create_time: 1, update_time: 2, mapping: { root: { id: 'root', parent: null, children: ['user-node'], message: null }, 'user-node': { id: 'user-node', parent: 'root', children: ['assistant-node'], message: { id: 'm-user', author: { role: 'user' }, content: { content_type: 'text', parts: ['Fixture user text'] }, metadata: { attachments: [{ id: 'file-1', mime_type: 'application/pdf', name: 'notes.pdf', size: 12 }] } } }, 'assistant-node': { id: 'assistant-node', parent: 'user-node', children: ['tool-node'], message: { id: 'm-assistant', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['Fixture assistant text'] } } }, 'tool-node': { id: 'tool-node', parent: 'assistant-node', children: [], message: { id: 'm-tool', author: { role: 'tool' }, content: { content_type: 'text', parts: ['hidden tool'] } } } } };
 const adapter = createChatGPTAdapter({ list: async () => [raw], fetch: async () => raw });
@@ -143,4 +143,13 @@ assert.deepEqual(buildSelectedExecutionTargets(['chatgpt:b'], [{ identity: 'chat
 assert.equal(buildSelectedExecutionTargets([], [{ identity: 'chatgpt:a', conversationId: 'a' }]).length, 0);
 assert.throws(() => buildSelectedExecutionTargets(['chatgpt:missing'], [{ identity: 'chatgpt:a', conversationId: 'a' }]));
 assert.equal(workspace.executionTargets()[0], 'b');
+assert.deepEqual(WORKSPACE_LAYOUT.panel, { gridTemplateColumns: 'minmax(0,1fr) 250px', gridTemplateRows: 'auto minmax(0,1fr)', overflow: 'hidden' });
+assert.deepEqual(WORKSPACE_LAYOUT.main, { minWidth: '0', minHeight: '0', overflow: 'hidden' });
+assert.deepEqual(WORKSPACE_LAYOUT.list, { flex: '1', minWidth: '0', minHeight: '0', overflowX: 'hidden', overflowY: 'auto' });
+assert.equal(WORKSPACE_LAYOUT.row.minWidth, '0');
+assert.equal(WORKSPACE_LAYOUT.title.minWidth, '0');
+assert.equal(WORKSPACE_LAYOUT.title.textOverflow, 'ellipsis');
+assert.deepEqual(WORKSPACE_LAYOUT.rail, { minWidth: '0', minHeight: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' });
+assert.equal(WORKSPACE_LAYOUT.action.marginTop, 'auto');
+assert.equal(JSON.stringify(pilotHooks.layout), JSON.stringify(WORKSPACE_LAYOUT));
 console.log('vertical slice PASS');
