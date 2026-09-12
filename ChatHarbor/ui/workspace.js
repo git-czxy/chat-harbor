@@ -1,7 +1,7 @@
 import { buildSelectedExportRequest, buildSelectedExecutionTargets, capabilityControls, preserveSelection, resolveSelectedConversations } from '../core/workflow.js';
 
 export const WORKSPACE_LAYOUT = Object.freeze({
-  panel: { gridTemplateColumns: 'minmax(0,1fr) 250px', gridTemplateRows: 'auto minmax(0,1fr)', overflow: 'hidden' },
+  panel: { gridTemplateColumns: 'minmax(0,1fr) 250px', gridTemplateRows: 'auto auto minmax(0,1fr)', overflow: 'hidden' },
   main: { minWidth: '0', minHeight: '0', overflow: 'hidden' },
   list: { flex: '1', minWidth: '0', minHeight: '0', overflowX: 'hidden', overflowY: 'auto' },
   row: { minWidth: '0', width: '100%', boxSizing: 'border-box' },
@@ -9,6 +9,36 @@ export const WORKSPACE_LAYOUT = Object.freeze({
   rail: { minWidth: '0', minHeight: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' },
   action: { marginTop: 'auto' }
 });
+
+export const WORKSPACE_SURFACE = Object.freeze({
+  toolbar: ['search', 'scope', 'archive', 'exportStatus', 'time', 'refresh'],
+  rail: ['selectionSummary', 'exportStrategy', 'recordManagement', 'progress', 'retry', 'exportActions']
+});
+
+export function workspaceAvailability(capabilities = {}) {
+  return {
+    toolbar: {
+      search: { visible: true, enabled: true },
+      scope: { visible: true, enabled: Boolean(capabilities.scope) },
+      archive: { visible: true, enabled: Boolean(capabilities.archive) },
+      exportStatus: { visible: true, enabled: false },
+      time: { visible: true, enabled: false },
+      refresh: { visible: true, enabled: true }
+    },
+    rail: {
+      selectionSummary: { visible: true, enabled: true },
+      exportStrategy: { visible: true, enabled: true },
+      recordManagement: { visible: true, enabled: false },
+      progress: { visible: true, enabled: true },
+      retry: { visible: true, enabled: true },
+      exportActions: {
+        selected: { visible: true, enabled: true },
+        currentFilter: { visible: true, enabled: false },
+        currentScope: { visible: Boolean(capabilities.scope), enabled: false }
+      }
+    }
+  };
+}
 
 export function executionControls(selectedCount, status = 'idle') {
   const active = status === 'running' || status === 'cancelling';
