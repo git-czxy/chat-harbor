@@ -64,3 +64,7 @@ This is TASK-006A verification only. It is not Human Acceptance, production read
 ## TASK-006B1 Progress + Cooperative Cancellation
 
 Automated/source-confirmed: the execution controller reports total/current/completed/success/skipped/failed/remaining/status/cancel-requested state; cancellation is cooperative and begins no new target after the in-flight target completes; completed and failed items remain recorded; failures retain identity for future retry and do not retry automatically. The Pilot rail now displays compact progress and exposes Cancel only while meaningful. TASK-006B1 live browser behavior remains Pending Human Browser Verification; TASK-006B2 Retry is not implemented.
+
+## TASK-006B1 Single-execution remediation — 2026-09-12
+
+Independent Review found a Pilot UI race: selection changes during an active run could re-enable Export, allowing concurrent controllers and ambiguous cancellation ownership. The Pilot now has an execution-active boundary: Export is disabled while running/cancelling, conversation checkboxes and Close are disabled, selection targets remain the pre-run snapshot, and all controls restore after completed/cancelled execution. The actual dist interaction rule is directly tested through the inert test hook. Core cancellation and failure semantics are unchanged. TASK-006B1 live browser verification remains Pending.

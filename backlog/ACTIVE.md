@@ -11,11 +11,11 @@ CHG-0002 TASK-006B1 Progress + Cooperative Cancellation。
 
 ## Current Work
 
-TASK-006A 已通过 Human Browser Verification。CHG-0002 TASK-006B1 Progress + Cooperative Cancellation 已完成自动验证，等待 independent Review；不自动开始 TASK-006B2 Retry。
+TASK-006A 已通过 Human Browser Verification。CHG-0002 TASK-006B1 single-execution remediation 已完成自动验证，等待 independent Review；不自动开始 TASK-006B2 Retry。
 
 ## Stop Condition
 
-CHG-0002 当前 Stop Condition：独立 Review TASK-006B1；仅 Review PASS 后进行有限 Human Browser Verification；不得开始 TASK-006B2 Retry。
+CHG-0002 当前 Stop Condition：独立 Review TASK-006B1 single-execution remediation；仅 Review PASS 后进行有限 Human Browser Verification；不得开始 TASK-006B2 Retry。
 
 ## Blocked
 
@@ -23,6 +23,6 @@ CHG-0002 当前 Stop Condition：独立 Review TASK-006B1；仅 Review PASS 后�
 
 ## Next Allowed
 
-- Independent Review TASK-006B1, then limited Human Browser Verification only after Review PASS.
+- Independent Review TASK-006B1 single-execution remediation, then limited Human Browser Verification only after Review PASS.
 - Do not begin TASK-006B2 Retry or later cache/attachment slices in this turn.
 - 可独立开展 source / license provenance 核验；公开发布前必须保留证据并经过 Human Gate。
