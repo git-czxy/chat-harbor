@@ -14,6 +14,9 @@
   window.__chatharborPilotLoaded = true;
 
   const identity = (c) => `${c.platform}:${c.conversationId}`;
+  const stable = (value) => Array.isArray(value) ? `[${value.map(stable).join(',')}]` : value && typeof value === 'object' ? `{${Object.keys(value).sort().map(k => `${JSON.stringify(k)}:${stable(value[k])}`).join(',')}}` : JSON.stringify(value ?? null);
+  const digest = (text) => { let left = 0xcbf29ce484222325n; let right = 0x84222325cbf29ce4n; const mask = 0xffffffffffffffffn; for (let i = 0; i < text.length; i++) { const c = BigInt(text.charCodeAt(i)); left = ((left ^ c) * 0x100000001b3n) & mask; right = ((right ^ (c + BigInt(i))) * 0x100000001b3n) & mask; } return `fp128:${left.toString(16).padStart(16, '0')}${right.toString(16).padStart(16, '0')}`; };
+  const observe = (c) => { if (!c.messages?.length) return { value: null, source: 'unknown' }; const canonical = { messages: c.messages.map(m => ({ messageId: m.messageId || null, parentId: m.parentId || null, role: m.role || null, contentType: m.contentType || null, content: m.content || '', createdAt: m.createdAt || null, updatedAt: m.updatedAt || null, attachments: m.attachments || [] })) }; return { value: digest(`chatharbor-content-v1:${stable(canonical)}`), source: 'canonical-message-fingerprint' }; };
   const normalize = (raw, meta = {}) => {
     const c = {
       platform: meta.platform || raw.platform,
@@ -47,8 +50,9 @@
   };
   const exportPair = (c) => {
     const artifactId = c.contentVersion ? `${identity(c)}#${c.contentVersion}` : `${identity(c)}#artifact-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const manifest = { schemaVersion: 'chatharbor-export-state-v1', artifactVersion: 1, identity: identity(c), platform: c.platform, conversationId: c.conversationId, titleAtExport: c.title, contentVersion: c.contentVersion, sourceUpdatedAt: c.updatedAt, exportedAt: new Date().toISOString(), representations: ['json', 'markdown'], artifactId, artifactRefs: [{ artifactId, representations: ['json', 'markdown'] }], attachmentManifest: c.attachments };
-    return { json: JSON.stringify({ ...c, identity: manifest.identity }, null, 2), md: markdown(c), manifest };
+    const observed = observe(c); const contentVersion = observed.value; const resolvedArtifactId = contentVersion ? `${identity(c)}#${contentVersion}` : artifactId;
+    const manifest = { schemaVersion: 'chatharbor-export-state-v1', artifactVersion: 1, artifactId: resolvedArtifactId, identity: identity(c), platform: c.platform, conversationId: c.conversationId, titleAtExport: c.title, contentVersion, contentVersionSource: observed.source, exportedAt: new Date().toISOString(), sourceUpdatedAt: c.updatedAt || null, representations: ['json', 'markdown'], artifactRefs: [resolvedArtifactId], attachmentManifest: c.attachments };
+    return { json: JSON.stringify({ ...c, identity: manifest.identity, contentVersion }, null, 2), md: markdown(c), manifest };
   };
   const token = async () => {
     const session = await (await fetch('/api/auth/session?unstable_client=true')).json();
@@ -67,7 +71,7 @@
     async detect() { return location.hostname === 'chatgpt.com' || location.hostname === 'chat.openai.com'; },
     async listConversations() {
       const h = await headers();
-      const r = await fetch('/backend-api/conversations?offset=0&limit=1&order=updated', { headers: h });
+      const r = await fetch('/backend-api/conversations?offset=0&limit=20&order=updated', { headers: h });
       if (!r.ok) throw new Error(`Conversation list failed: ${r.status}`);
       const j = await r.json();
       return (j.items || []).map(x => normalize(x, { platform: 'chatgpt', conversationId: x.id, title: x.title, createdAt: x.create_time, updatedAt: x.update_time }));
@@ -82,7 +86,7 @@
     }
   };
   const download = (name, content, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
-  const buildRequest = (ids, strategy) => ids.length ? { selectedIds: [...ids], confirmation: { range: 'selected', count: ids.length, strategy, batchCount: 1, skipLatest: true } } : null;
+  const buildRequest = (ids, strategy) => ids.length ? { selectedIds: [...ids], confirmation: { range: 'selected', count: ids.length, strategy, batchCount: 1, skipLatest: false } } : null;
   const run = async () => {
     if (!(await adapter.detect())) throw new Error('ChatGPT not detected');
     const list = await adapter.listConversations();

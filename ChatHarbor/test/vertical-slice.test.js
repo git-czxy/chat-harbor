@@ -5,7 +5,7 @@ import { conversationIdentity, normalizeConversation } from '../models/conversat
 import { exportConversation } from '../export/pipeline.js';
 import { createExportState, recordObservedVersion, recordSuccessfulExport, migrateLegacyState, recoverArtifact } from '../core/export-state.js';
 import { fingerprintContent, observeContentVersion } from '../core/versioning.js';
-import { buildExportConfirmation, buildSelectedExportRequest, preserveSelection, shouldSkipLatest, capabilityControls } from '../core/workflow.js';
+import { buildExportConfirmation, buildSelectedExportRequest, preserveSelection, shouldSkipLatest, capabilityControls, resolveSelectedConversations } from '../core/workflow.js';
 import { createWorkspaceModel } from '../ui/workspace.js';
 
 const raw = { id: 'conv-1', title: 'Original', create_time: 1, update_time: 2, mapping: { root: { id: 'root', parent: null, children: ['user-node'], message: null }, 'user-node': { id: 'user-node', parent: 'root', children: ['assistant-node'], message: { id: 'm-user', author: { role: 'user' }, content: { content_type: 'text', parts: ['Fixture user text'] }, metadata: { attachments: [{ id: 'file-1', mime_type: 'application/pdf', name: 'notes.pdf', size: 12 }] } } }, 'assistant-node': { id: 'assistant-node', parent: 'user-node', children: ['tool-node'], message: { id: 'm-assistant', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['Fixture assistant text'] } } }, 'tool-node': { id: 'tool-node', parent: 'assistant-node', children: [], message: { id: 'm-tool', author: { role: 'tool' }, content: { content_type: 'text', parts: ['hidden tool'] } } } } };
@@ -119,4 +119,7 @@ assert.deepEqual(workspace.summary(), { matched: 1, total: 2, selected: 1 });
 assert.equal(workspace.controls.scope, false);
 assert.equal(workspace.controls.archive, false);
 assert.equal(workspace.selectedExport().selectedIds[0], 'chatgpt:b');
+assert.equal(workspace.selectedExport().confirmation.skipLatest, false);
+assert.deepEqual(resolveSelectedConversations(['chatgpt:conv-1'], [{ identity: 'chatgpt:conv-1', conversationId: 'conv-1' }]).map(c => c.conversationId), ['conv-1']);
+assert.deepEqual(workspace.selectedConversations().map(c => c.identity), ['chatgpt:b']);
 console.log('vertical slice PASS');

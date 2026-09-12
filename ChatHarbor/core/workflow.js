@@ -11,6 +11,11 @@ export function buildSelectedExportRequest({ selectedIds, strategy, batchCount, 
   return { selectedIds: [...selectedIds], confirmation };
 }
 
+export function resolveSelectedConversations(selectedIds, conversations) {
+  const selected = new Set(selectedIds || []);
+  return conversations.filter(conversation => selected.has(conversation.identity));
+}
+
 export function shouldSkipLatest(state, { skipLatest = true } = {}) {
   return Boolean(skipLatest && deriveExportStatus(state) === 'latest');
 }
