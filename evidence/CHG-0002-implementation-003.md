@@ -102,3 +102,13 @@ The remediation adds a Core reconciliation contract that preserves unattempted p
 ## TASK-006B2 Independent Review — PASS
 
 Independent Review passed the retry remediation. TASK-006B2 is complete for implementation and automated verification. Live browser failure-path evidence is Deferred/Unknown until an integrated workflow milestone or a naturally occurring failure; no artificial 401/403/5xx/offline test is requested from the Human Owner.
+
+## TASK-006C Full Conversation Index + Validated Cache + Incremental Refresh — implementation and automated verification
+
+Donor reuse is bounded and evidence-based: the generic exporter’s serial offset/items/total continuation and max-page guard were adapted at the ChatGPT Adapter/Index boundary; ChatGPT v0.4’s ordered first-page `(conversationId, updatedAt)` snapshot probe was adapted only as an index refresh hint. The existing ChatHarbor stable identity and logical selection contracts remain authoritative.
+
+Automated/source-confirmed: the Index performs serial 20-item page loading, dedupes by stable `platform + conversationId` identity, terminates by available total or short/empty pages, and fails safely at the page guard. It writes schema-versioned metadata snapshots through an injected storage seam. Every persistent snapshot is preceded by a live first-page probe: a matching probe reuses the cached full logical list without pagination; a mismatch, cache miss, malformed/incompatible cache, or explicit Full Refresh performs a full resync; a probe failure rejects without rendering persistent cache as current account data. `updatedAt` appears only in the ordered probe and is never treated as content version, freshness proof, or export-state input.
+
+The Pilot exposes a secondary Full Refresh action and reports validated-cache/sync progress while retaining selection only for identities still present after refresh. Actual `dist/ChatHarbor-Pilot.user.js` index/cache primitives are executed via the inert VM hook. Tests cover 45 conversations over three pages, duplicate IDs, total and total-missing termination, max-page guard, cache miss/match/mismatch, force refresh, corrupted cache, probe failure, selection reconciliation, and dist parity. Existing TASK-006A, TASK-006B1, and TASK-006B2 tests remain PASS.
+
+Human Browser Verification is not performed or claimed for TASK-006C. Real multi-page list, cache reuse, and Full Refresh behavior remain Pending an Independent Review decision on one focused integrated browser milestone. No GitHub CI claim is made.
