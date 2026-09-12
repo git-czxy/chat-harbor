@@ -18,6 +18,23 @@ ChatHarbor Core + Platform Adapters is the current architecture. The generic scr
 
 Implement in vertical slices around the Core/Adapter boundary. Do not route new product behavior through legacy UI or old full-export dialogs.
 
+### Legacy / Current Capability Donor Arbitration
+
+`evidence/CHG-0002-DONOR-ARBITRATION.md` is the capability-level donor matrix for ChatGPT v0.4, the generic exporter, and current ChatHarbor. Legacy / Reference means not a product route; it does not prohibit extracting a proven implementation.
+
+Before implementing any capability:
+
+1. inspect all available donors;
+2. choose the best implementation or compatible combination;
+3. prefer reuse/adaptation over rewrite;
+4. rewrite only when the matrix justifies it with evidence.
+
+Platform-specific behavior remains inside its Platform Adapter. CHG-0004 identity, version, export-state, manifest, and recovery contracts remain authoritative.
+
+### Human Verification Strategy
+
+Micro behavior requires automated tests and independent Review. Human Browser Verification is reserved for focused integrated workflow milestones, not repeated helper-level QA.
+
 ## Work Items
 
 - [x] TASK-001: Complete source-based Discovery and gap analysis.
