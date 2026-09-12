@@ -78,3 +78,9 @@ Human Browser Verification confirmed progress/completion and normal 3/3 completi
 Human Browser Verification confirmed Cancel visibility but found insufficient visual prominence: it appeared like ordinary text without dangerous-action styling. This is recorded as a UI styling defect only; cancellation semantics are unchanged. Source and actual dist now share a red dangerous-action button contract with full width, padding, radius, white text, semibold weight, and disabled-state opacity/cursor treatment. Final visual verification remains Pending.
 
 Local automated validation for this remediation: vertical slice tests, source/dist syntax checks, and `git diff --check` PASS. No GitHub CI claim is made.
+
+## TASK-006B1 Human Browser Verification — PASS
+
+Human Browser Verification confirmed the final Cancel interaction: the Cancel button was visibly red during active execution and effective when clicked. With 3 selected conversations, execution ended as `cancelled` at progress 1/3: success 1, failed 0, skipped 0, remaining 2. The started/current item completed while the remaining two items did not start, confirming cooperative cancellation. Export controls were restored after execution ended.
+
+This is TASK-006B1 Human Browser Verification PASS only, not Human Acceptance or CHG-0002 closure. TASK-006B2 Retry remains pending and not started.
