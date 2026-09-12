@@ -95,3 +95,7 @@ The distributable execution path now resolves stable selection identities throug
 ## Browser Layout Remediation — 2026-09-12
 
 Human Browser Verification confirmed workspace opening and a 20-record first page, then found horizontal list overflow and an off-viewport export action. The Pilot now constrains its second grid row and all nested flex/list children so the list scrolls internally and the export rail action remains visible. Final visual confirmation remains Pending Human Browser Re-verification after independent Review.
+
+## TASK-006A Browser PASS / TASK-006B1 Start — 2026-09-12
+
+TASK-006A has independent Review PASS and Human Browser Verification PASS for workspace, selection, confirmation, selected-only JSON/Markdown export, and layout containment. This is not Change closure or Human Acceptance. TASK-006B1 now adds Progress + Cooperative Cancellation only; Retry remains explicitly deferred to TASK-006B2.

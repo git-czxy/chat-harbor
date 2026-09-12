@@ -54,3 +54,13 @@ Independent Review found the previous parity check compared `exportConversation(
 Human Browser Verification confirmed the real ChatGPT workspace opens, the conservative first page renders 20 conversations, matched/total is 20/20, and zero-selection state exists. It also observed horizontal list overflow and an export-selected button outside the visible viewport. These are classified as Pilot UI layout-containment defects, not Core/runtime/export-state defects.
 
 Source and automated evidence after remediation confirms a bounded second grid row, shrinkable main/list/row/title/rail elements, vertical-only list scrolling, title ellipsis, and a flex-column rail with its action at the bottom. The test also compares the actual dist layout contract with the authoritative source contract. Final browser visual verification remains Pending Human Browser Re-verification.
+
+## TASK-006A Human Browser Verification — PASS
+
+Human Browser Verification confirmed: the real ChatGPT Pilot Workspace opens; the first page shows 20 conversations; prior horizontal overflow is fixed; the export-selected action remains visible; logical selection survives filtering; confirmation shows the selected range, count, strategy, and batch count; `skipLatest` is false; cancelling confirmation downloads nothing; confirming exports only the selected conversation; and that conversation produces JSON and Markdown without exporting an unselected conversation.
+
+This is TASK-006A verification only. It is not Human Acceptance, production readiness, or CHG-0002 closure.
+
+## TASK-006B1 Progress + Cooperative Cancellation
+
+Automated/source-confirmed: the execution controller reports total/current/completed/success/skipped/failed/remaining/status/cancel-requested state; cancellation is cooperative and begins no new target after the in-flight target completes; completed and failed items remain recorded; failures retain identity for future retry and do not retry automatically. The Pilot rail now displays compact progress and exposes Cancel only while meaningful. TASK-006B1 live browser behavior remains Pending Human Browser Verification; TASK-006B2 Retry is not implemented.
