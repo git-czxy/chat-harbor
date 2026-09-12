@@ -54,6 +54,11 @@
     const manifest = { schemaVersion: 'chatharbor-export-state-v1', artifactVersion: 1, artifactId: resolvedArtifactId, identity: identity(c), platform: c.platform, conversationId: c.conversationId, titleAtExport: c.title, contentVersion, contentVersionSource: observed.source, exportedAt: new Date().toISOString(), sourceUpdatedAt: c.updatedAt || null, representations: ['json', 'markdown'], artifactRefs: [resolvedArtifactId], attachmentManifest: c.attachments };
     return { json: JSON.stringify({ ...c, identity: manifest.identity, contentVersion }, null, 2), md: markdown(c), manifest };
   };
+  if (globalThis.__CHATHARBOR_TEST_HOOKS__) {
+    globalThis.__CHATHARBOR_TEST_HOOKS__.observe = observe;
+    globalThis.__CHATHARBOR_TEST_HOOKS__.exportPair = exportPair;
+    return;
+  }
   const token = async () => {
     const session = await (await fetch('/api/auth/session?unstable_client=true')).json();
     if (!session.accessToken) throw new Error('ChatGPT access token unavailable');
