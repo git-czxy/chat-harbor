@@ -34,5 +34,5 @@ next_allowed:
 prohibited:
 - treat historical plans as implementation evidence
 - silently override human decisions
-last_validated_commit: d466e0bbbad3fbf08f1f2534a6cd544e45189a79
+last_validated_commit: 0b38c7a
 last_updated: '2026-09-12'
