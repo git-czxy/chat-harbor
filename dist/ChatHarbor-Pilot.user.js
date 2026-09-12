@@ -46,7 +46,8 @@
     return [`# ${c.title || 'Untitled conversation'}`, '', `- Platform: ${c.platform}`, `- Conversation ID: ${c.conversationId}`, '', ...c.messages.flatMap(m => [`## ${m.author?.role || m.role || 'message'}`, '', text(m), ''])].join('\n');
   };
   const exportPair = (c) => {
-    const manifest = { identity: identity(c), platform: c.platform, conversationId: c.conversationId, titleAtExport: c.title, contentVersion: c.contentVersion, exportedAt: new Date().toISOString(), representations: ['json', 'markdown'], attachmentManifest: c.attachments };
+    const artifactId = c.contentVersion ? `${identity(c)}#${c.contentVersion}` : `${identity(c)}#artifact-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const manifest = { schemaVersion: 'chatharbor-export-state-v1', artifactVersion: 1, identity: identity(c), platform: c.platform, conversationId: c.conversationId, titleAtExport: c.title, contentVersion: c.contentVersion, sourceUpdatedAt: c.updatedAt, exportedAt: new Date().toISOString(), representations: ['json', 'markdown'], artifactId, artifactRefs: [{ artifactId, representations: ['json', 'markdown'] }], attachmentManifest: c.attachments };
     return { json: JSON.stringify({ ...c, identity: manifest.identity }, null, 2), md: markdown(c), manifest };
   };
   const token = async () => {
@@ -81,17 +82,20 @@
     }
   };
   const download = (name, content, type) => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([content], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); };
+  const buildRequest = (ids, strategy) => ids.length ? { selectedIds: [...ids], confirmation: { range: 'selected', count: ids.length, strategy, batchCount: 1, skipLatest: true } } : null;
   const run = async () => {
     if (!(await adapter.detect())) throw new Error('ChatGPT not detected');
     const list = await adapter.listConversations();
     if (!list.length) throw new Error('No conversation returned');
-    const c = await adapter.fetchConversation(list[0].conversationId);
-    const out = exportPair(c);
-    const base = `chatharbor-${c.conversationId}`;
-    download(`${base}.json`, out.json, 'application/json');
-    download(`${base}.md`, out.md, 'text/markdown');
-    console.info('[ChatHarbor Pilot] adapter=list/fetch, normalized=', c, 'manifest=', out.manifest);
-    alert(`ChatHarbor Pilot PASS\n${c.identity}\nJSON + Markdown downloaded\ncontentVersion: ${String(c.contentVersion)}`);
+    const selected = new Set(); let filtered = [...list];
+    const overlay = document.createElement('div'); Object.assign(overlay.style, { position: 'fixed', inset: '0', zIndex: '2147483645', background: 'rgba(0,0,0,.42)', display: 'flex', alignItems: 'center', justifyContent: 'center' });
+    const panel = document.createElement('section'); Object.assign(panel.style, { width: 'min(1080px,94vw)', height: 'min(720px,88vh)', background: '#fff', color: '#111', borderRadius: '14px', padding: '18px', display: 'grid', gridTemplateColumns: 'minmax(0,1fr) 250px', gap: '14px', font: '14px system-ui', boxSizing: 'border-box' });
+    panel.innerHTML = `<header style="grid-column:1/-1;display:flex;justify-content:space-between;align-items:center"><div><strong style="font-size:20px">ChatHarbor Pilot Workspace</strong><div data-role="status" style="color:#666;font-size:12px">ChatGPT · Test/Pilot</div></div><button data-role="close">关闭</button></header><main style="min-width:0;display:flex;flex-direction:column;gap:10px"><input data-role="search" placeholder="搜索标题或 Conversation ID"><div data-role="list" style="overflow:auto;flex:1;border:1px solid #ddd;border-radius:8px"></div></main><aside style="border:1px solid #ddd;border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:12px;min-width:0"><div data-role="summary"></div><div><strong>导出策略</strong><div data-role="strategy">当前 Pilot · 单批</div></div><button data-role="export" disabled style="margin-top:auto;padding:10px;border:0;border-radius:8px;background:#10a37f;color:#fff;font-weight:700">导出选中 0 条</button></aside>`;
+    const listEl = panel.querySelector('[data-role="list"]'); const search = panel.querySelector('[data-role="search"]'); const summary = panel.querySelector('[data-role="summary"]'); const exportBtn = panel.querySelector('[data-role="export"]');
+    const render = () => { const q = search.value.trim().toLowerCase(); filtered = list.filter(c => !q || `${c.title} ${c.identity}`.toLowerCase().includes(q)); listEl.innerHTML = ''; filtered.forEach(c => { const row = document.createElement('label'); row.style.cssText = 'display:flex;gap:8px;padding:10px;border-bottom:1px solid #eee;cursor:pointer'; row.innerHTML = `<input type="checkbox" ${selected.has(c.identity) ? 'checked' : ''}><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.title || '(未命名)'} <small style="color:#777">${c.conversationId}</small></span>`; row.querySelector('input').onchange = e => { e.target.checked ? selected.add(c.identity) : selected.delete(c.identity); render(); }; listEl.appendChild(row); }); summary.textContent = `已选 ${selected.size} 条 · 匹配 ${filtered.length} / 总计 ${list.length}`; exportBtn.textContent = `导出选中 ${selected.size} 条`; exportBtn.disabled = selected.size === 0; };
+    search.oninput = render; panel.querySelector('[data-role="close"]').onclick = () => overlay.remove();
+    exportBtn.onclick = async () => { const request = buildRequest([...selected], '当前 Pilot'); if (!request) return; const message = `导出范围：当前选择\n条数：${request.confirmation.count}\n策略：${request.confirmation.strategy}\n预计批次：${request.confirmation.batchCount}\n跳过已是最新：${request.confirmation.skipLatest ? '是' : '否'}\n\n继续？`; if (!confirm(message)) return; exportBtn.disabled = true; for (const id of request.selectedIds) { const c = await adapter.fetchConversation(id); const out = exportPair(c); download(`chatharbor-${c.conversationId}.json`, out.json, 'application/json'); download(`chatharbor-${c.conversationId}.md`, out.md, 'text/markdown'); console.info('[ChatHarbor Pilot] selected export', c, out.manifest); } overlay.remove(); alert(`ChatHarbor Pilot PASS\n已导出 ${request.selectedIds.length} 条`); };
+    render(); overlay.appendChild(panel); document.body.appendChild(overlay);
   };
   const button = document.createElement('button');
   button.textContent = 'ChatHarbor Pilot';
