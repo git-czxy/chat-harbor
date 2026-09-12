@@ -12,7 +12,7 @@ export const WORKSPACE_LAYOUT = Object.freeze({
 
 export function executionControls(selectedCount, status = 'idle') {
   const active = status === 'running' || status === 'cancelling';
-  return { active, exportEnabled: selectedCount > 0 && !active, selectionEnabled: !active, closeEnabled: !active };
+  return { active, exportEnabled: selectedCount > 0 && !active, selectionEnabled: !active, closeEnabled: !active, cancelVisible: status === 'running' || status === 'cancelling', cancelEnabled: status === 'running' };
 }
 
 export function createWorkspaceModel({ conversations = [], capabilities = {}, selectedIds = new Set(), strategy = '当前速度', batchCount = 1, skipLatest = false } = {}) {
