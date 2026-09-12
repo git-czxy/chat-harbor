@@ -2,10 +2,10 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 54
+state_version: 55
 current_objective:
   id: OBJ-001
-  title: Independent Review TASK-006B2 Retry Integration。
+  title: Independent Review TASK-006B2 Retry Remediation。
 current_milestone:
   id: M0
   title: PDR Adoption / Baseline Reconstruction
@@ -15,7 +15,7 @@ active_changes:
 active_work:
 - id: CHG-0002
   status: VERIFYING
-  summary: TASK-006A and TASK-006B1 Human Browser Verification PASS；TASK-006B2 Retry implementation and automated validation complete，waiting Independent Review；no TASK-006B2 Human Browser Verification yet。
+  summary: TASK-006A and TASK-006B1 Human Browser Verification PASS；TASK-006B2 Retry remediation and automated validation complete，waiting Independent Review；no TASK-006B2 Human Browser Verification yet。
 blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
@@ -26,7 +26,7 @@ unknowns:
   refresh、backup/restore、batch/rate/pause、TASK-006B2 retry real-browser behavior、production UX 尚未验证。
 - ChatGPT 原生 reliable content revision 尚未确认；实现阶段必须保留 Unknown fallback。
 next_allowed:
-- independent Review CHG-0002 TASK-006B2 Retry Integration
+- independent Review CHG-0002 TASK-006B2 Retry Remediation
 - only after Review PASS: focused Human Browser Verification if Governance determines it is required
 - do not start later cache/attachment/batch/ZIP capabilities
 - keep unverified export, attachment, cache, and production UX capabilities as Unknown
@@ -34,5 +34,5 @@ next_allowed:
 prohibited:
 - treat historical plans as implementation evidence
 - silently override human decisions
-last_validated_commit: 24a8a3db7371e3e7e733eaa22cc3ae5844a5f4c3
+last_validated_commit: 790602874a97f1a1f6176446bbc292d249d472e0
 last_updated: '2026-09-12'

@@ -45,7 +45,7 @@ Micro behavior requires automated tests and independent Review. Human Browser Ve
 - [x] TASK-006A: Implement minimum Pilot workspace, export rail, explicit selected-export confirmation, and selected-only execution in ChatHarbor product path; Human Browser Verification PASS.
 - [ ] TASK-006B: Implement progress, cancellation, and retry integration.
   - [x] TASK-006B1: Progress + Cooperative Cancellation; Automated Review PASS and Human Browser Verification PASS.
-  - [ ] TASK-006B2: Retry; implementation and automated verification complete, Independent Review pending.
+  - [ ] TASK-006B2: Retry; implementation and automated remediation complete, Independent Review pending.
 - [x] TASK-007: Supersede migration of the new workspace into ChatGPT v0.4; retain v0.4 as Legacy / Reference.
 
 ## Risks
@@ -68,4 +68,4 @@ Keep ChatGPT v0.4 unchanged as Legacy / Reference. Future ChatHarbor implementat
 
 Plan completion is not Change completion. Remaining implementation slices and live acceptance still require evidence before closure.
 
-Current stop condition: independent Review of CHG-0002 Capability Donor Arbitration; do not start TASK-006B2 Retry until Review PASS.
+Current stop condition: independent Review of TASK-006B2 Retry remediation; do not begin later CHG-0002 capabilities until Review PASS.
