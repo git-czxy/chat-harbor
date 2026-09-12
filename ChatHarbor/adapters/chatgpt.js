@@ -31,7 +31,7 @@ export function createChatGPTAdapter({ list, listPage, fetch, refreshAuth } = {}
     platform: 'chatgpt',
     capabilities: {
       scope: false,
-      archive: false,
+      archive: true,
       attachments: true,
       reasoning: false,
       sources: false,
@@ -46,7 +46,8 @@ export function createChatGPTAdapter({ list, listPage, fetch, refreshAuth } = {}
         items: items.map(raw => normalizeConversation(raw, {
           platform: 'chatgpt', conversationId: raw.id,
           title: raw.title, createdAt: raw.create_time,
-          updatedAt: raw.update_time
+          updatedAt: raw.update_time,
+          archived: Boolean(options.archived)
         })),
         offset: page.offset ?? options.offset ?? 0,
         total: Number.isInteger(page.total) ? page.total : null

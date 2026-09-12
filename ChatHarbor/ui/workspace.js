@@ -22,14 +22,24 @@ export function retryControls(failureCount, status = 'idle') {
 
 export const CANCEL_BUTTON_STYLE = Object.freeze({ width: '100%', padding: '10px', border: '0', borderRadius: '8px', background: '#dc2626', color: '#fff', fontWeight: '600', cursor: 'pointer' });
 
+export function filterConversations(conversations, { query = '', archive = 'unarchived' } = {}) {
+  const q = query.trim().toLowerCase();
+  return conversations.filter(conversation => {
+    if (archive === 'unarchived' && conversation.archived) return false;
+    if (archive === 'archived' && !conversation.archived) return false;
+    return !q || `${conversation.title} ${conversation.identity}`.toLowerCase().includes(q);
+  });
+}
+
 export function createWorkspaceModel({ conversations = [], capabilities = {}, selectedIds = new Set(), strategy = '当前速度', batchCount = 1, skipLatest = false } = {}) {
   const selected = preserveSelection(selectedIds, conversations.map(c => c.identity));
   return {
     conversations,
     selected,
     query: '',
+    archive: 'unarchived',
     controls: capabilityControls(capabilities),
-    filtered() { const q = this.query.trim().toLowerCase(); return q ? this.conversations.filter(c => `${c.title} ${c.identity}`.toLowerCase().includes(q)) : [...this.conversations]; },
+    filtered() { return filterConversations(this.conversations, { query: this.query, archive: this.archive }); },
     summary() { return { matched: this.filtered().length, total: this.conversations.length, selected: this.selected.size }; },
     selectedExport() { return buildSelectedExportRequest({ selectedIds: [...this.selected], strategy, batchCount, skipLatest }); },
     selectedConversations() { return resolveSelectedConversations(this.selected, this.conversations); },
