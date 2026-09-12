@@ -72,3 +72,9 @@ Independent Review found a Pilot UI race: selection changes during an active run
 ## TASK-006B1 Cancel visibility remediation — 2026-09-12
 
 Human Browser Verification confirmed progress/completion and normal 3/3 completion, but explicitly observed that the Cancel action was not visible during execution. This is recorded as a real TASK-006B1 Pilot interaction-state failure, not as a timing exception. The remediation makes Cancel visibility and enabled state part of the authoritative interaction model and sets explicit `running` status before the first asynchronous fetch. Human Browser Re-verification remains Pending.
+
+## TASK-006B1 Cancel visual remediation — 2026-09-12
+
+Human Browser Verification confirmed Cancel visibility but found insufficient visual prominence: it appeared like ordinary text without dangerous-action styling. This is recorded as a UI styling defect only; cancellation semantics are unchanged. Source and actual dist now share a red dangerous-action button contract with full width, padding, radius, white text, semibold weight, and disabled-state opacity/cursor treatment. Final visual verification remains Pending.
+
+Local automated validation for this remediation: vertical slice tests, source/dist syntax checks, and `git diff --check` PASS. No GitHub CI claim is made.
