@@ -91,3 +91,7 @@ Independent Review found identity-to-fetch translation, Pilot/Core manifest/vers
 ## Final Execution Remediation — 2026-09-12
 
 The distributable execution path now resolves stable selection identities through the logical list before calling the adapter with bare conversation IDs. Direct execution-target and Core/Pilot manifest parity tests are included. Review remains the gate before any further Human Browser Verification.
+
+## Browser Layout Remediation — 2026-09-12
+
+Human Browser Verification confirmed workspace opening and a 20-record first page, then found horizontal list overflow and an off-viewport export action. The Pilot now constrains its second grid row and all nested flex/list children so the list scrolls internally and the export rail action remains visible. Final visual confirmation remains Pending Human Browser Re-verification after independent Review.

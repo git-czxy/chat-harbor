@@ -48,3 +48,9 @@ Partial Browser Evidence only: a prior Human run opened the workspace, rendered 
 ## Final execution parity remediation — 2026-09-12
 
 Independent Review found the previous parity check compared `exportConversation()` with itself and therefore did not execute Pilot logic. The test now loads the actual `dist/ChatHarbor-Pilot.user.js` in an inert Node VM hook and directly executes its `observe()` and `exportPair()` functions. The same fixture directly asserts fingerprint source/value and manifest parity, including artifact reference semantics. No browser verification is performed in this remediation.
+
+## Human Browser Evidence and layout remediation — 2026-09-12
+
+Human Browser Verification confirmed the real ChatGPT workspace opens, the conservative first page renders 20 conversations, matched/total is 20/20, and zero-selection state exists. It also observed horizontal list overflow and an export-selected button outside the visible viewport. These are classified as Pilot UI layout-containment defects, not Core/runtime/export-state defects.
+
+Source and automated evidence after remediation confirms a bounded second grid row, shrinkable main/list/row/title/rail elements, vertical-only list scrolling, title ellipsis, and a flex-column rail with its action at the bottom. The test also compares the actual dist layout contract with the authoritative source contract. Final browser visual verification remains Pending Human Browser Re-verification.
