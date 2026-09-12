@@ -29,3 +29,16 @@ Slice: TASK-006A — ChatHarbor Pilot Workspace + Selected Export Rail
 - `git diff --check` — PASS
 
 TASK-003 remains Partial/Unknown for archived project metadata; it does not block this slice because unsupported Scope/archive controls remain hidden.
+
+## Independent Review remediation — 2026-09-12
+
+Review found and this pass addresses:
+
+- identity selection keys were being passed to the adapter instead of bare `conversationId`;
+- Pilot export logic had drifted from the Core version/manifest contract;
+- Pilot displayed `skipLatest=true` without a persisted state runtime;
+- `limit=1` prevented limited multi-selection browser verification.
+
+Automated/source-confirmed after remediation: selected identity resolution returns `conv-1` from `chatgpt:conv-1`; Pilot uses canonical-message fingerprint fallback, Core-shaped manifest fields and `artifactRefs: [artifactId]`; Pilot confirmation uses `skipLatest: false`; Pilot requests one conservative page of 20 records; selected-only model and zero-selection request behavior remain covered. Legacy scripts remain unchanged.
+
+Partial Browser Evidence only: a prior Human run opened the workspace, rendered one row, and showed the zero-selection action disabled. Because this code changed afterward, selected export, multi-selection, and final browser behavior remain Pending Human Browser Verification.

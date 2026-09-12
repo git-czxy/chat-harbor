@@ -83,3 +83,7 @@ This change is ready to close when all Acceptance Criteria have Evidence and req
 ## Current Slice — Export Rail + Explicit Confirmation
 
 This slice is complete only when the ChatHarbor product path provides the Pilot workspace, selected-only execution, explicit confirmation, and conservative four-state/Unknown semantics. Progress, cancel, retry, cache, attachment download, and other later slices remain open.
+
+## TASK-006A Remediation — 2026-09-12
+
+Independent Review found identity-to-fetch translation, Pilot/Core manifest/version drift, false `skipLatest` presentation, and a one-record Pilot page boundary. The remediation keeps selection identity as `platform:conversationId`, resolves adapter fetches through ConversationMetadata, aligns Pilot output with the Core pipeline, uses `skipLatest: false` until persisted state execution exists, and requests one conservative page of at most 20 records. Status remains VERIFYING pending independent Review and Human Browser Verification; this is not Human Acceptance.
