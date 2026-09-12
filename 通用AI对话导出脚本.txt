@@ -1474,18 +1474,6 @@
   function isPendingExport(id, platform) {
     return getPendingIds(platform).has(id);
   }
-  function getConversationExportStatus(item, platform) {
-    const id = item.id ?? item.conversationId;
-    const records = readJSON(recordKey(platform), {});
-    const record = records[id];
-    const priorExport = getExportedIds(platform).has(id) || Boolean(record);
-    const currentVersion = item.contentVersion ?? null;
-    const versions = record ? [record.contentVersion ?? null] : [];
-    if (!priorExport && !versions.length) return "never_exported";
-    if (currentVersion == null) return "unknown";
-    if (versions.includes(currentVersion)) return "latest";
-    return versions.some((version) => version == null) ? "unknown" : "has_updates";
-  }
   function markConversationsPending(ids, platform) {
     if (!ids || ids.length === 0) return;
     const set = getPendingIds(platform);
@@ -3241,7 +3229,8 @@
           <button data-role="loadMore" style="padding:6px 12px;border:1px solid #ccc;border-radius:8px;background:#fff;cursor:pointer;display:none">加载更多</button>
           <span style="flex:1"></span>
           <button data-role="cancel" style="padding:7px 14px;border-radius:8px;border:1px solid #ccc;background:#fff;color:#111;cursor:pointer">取消</button>
-          <button data-role="ok" style="padding:7px 14px;border-radius:8px;border:none;background:#10a37f;color:#fff;cursor:pointer">导出选中 0 条</button>
+          <button data-role="exportAll" style="padding:7px 14px;border-radius:8px;border:1px solid #333;background:#fff;color:#111;cursor:pointer">导出全部</button>
+          <button data-role="ok" style="padding:7px 14px;border-radius:8px;border:none;background:#111;color:#fff;cursor:pointer">导出选中</button>
         </div>`;
       const [header, toolbar, strategy, records, list, footer] = Array.from(panel.children);
       const workspace = document.createElement("div");
@@ -3318,10 +3307,10 @@
         const exportedSet = getExportedIds(adapter.platform);
         state.filtered = state.list.filter((item) => {
           if (q && !`${item.title ?? ""} ${item.id ?? ""}`.toLowerCase().includes(q)) return false;
-          const status = getConversationExportStatus(item, adapter.platform);
+          const status = exportedSet.has(item.id) ? "latest" : "unexported";
           if (state.exportStatus === "pending" && status === "latest") return false;
           if (state.exportStatus === "exported" && status !== "latest") return false;
-          if (state.exportStatus === "unexported" && status !== "never_exported") return false;
+          if (state.exportStatus === "unexported" && status !== "unexported") return false;
           if (state.exportStatus === "updated") return false;
           if (state.exportStatus === "latest" && status !== "latest") return false;
           const projectId = item.project_id ?? item.projectId ?? null;
@@ -3395,10 +3384,6 @@
 
       function updateSelCount() {
         selCountEl.textContent = `已选 ${state.selected.size} 条`;
-        const selectedButton = panel.querySelector('[data-role="ok"]');
-        selectedButton.textContent = `导出选中 ${state.selected.size} 条`;
-        selectedButton.disabled = state.selected.size === 0;
-        selectedButton.style.opacity = state.selected.size === 0 ? "0.55" : "1";
         selectionSummaryEl.textContent = `已选 ${state.selected.size} 条`;
         matchSummaryEl.textContent = `匹配 ${state.filtered.length} / 总计 ${state.list.length}`;
       }
@@ -3514,11 +3499,12 @@
       panel.addEventListener("keydown", (e) => { if (e.key === "Escape") { overlay.remove(); resolve(null); } });
 
       const confirmRun = (ids) => {
-        if (!ids || ids.length === 0) return;
-        const batches = Math.max(1, Math.ceil(ids.length / state.maxBatch));
-        const strategy = SPEED_LEVELS[state.speedIndex]?.name || "当前速度";
-        const confirmation = { range: "selected", count: ids.length, strategy, batchCount: batches, skipLatest: true };
-        const msg = `导出范围：当前选择\n条数：${confirmation.count}\n策略：${confirmation.strategy}\n预计批次：${confirmation.batchCount}\n跳过已是最新：${confirmation.skipLatest ? "是" : "否"}\n\n继续？`;
+        if (!ids || ids.length === 0) ids = undefined; // 未选则导出全部
+        const total = ids ? ids.length : state.list.length;
+        const batches = Math.max(1, Math.ceil((ids ? ids.length : state.list.filter((m) => !isAlreadyExported(m.id, adapter.platform)).length) / state.maxBatch));
+        const msg = ids
+          ? `已选 ${ids.length} 条，将分 ${batches} 批导出（每批最多 ${state.maxBatch} 条，批间自动暂停）。继续？`
+          : `将导出全部 ${total} 条对话（按 ${state.maxBatch} 条/批分 ${batches} 批，跳过已导出，批间自动暂停）。继续？`;
         if (!confirm(msg)) return;
         // 持久化本次设置
         saveSettings(Object.assign(getSettings(), {
@@ -3538,6 +3524,8 @@
         }
         confirmRun(Array.from(state.selected));
       });
+      panel.querySelector('[data-role="exportAll"]').addEventListener("click", () => confirmRun(undefined));
+
       document.body.appendChild(overlay);
       loadAll();
     });

@@ -1,14 +1,24 @@
+import { deriveExportStatus } from './export-state.js';
+
 export function buildExportConfirmation({ range, count, strategy, batchCount, skipLatest }) {
+  if (count <= 0) return null;
   return { range, count, strategy, batchCount, skipLatest: Boolean(skipLatest) };
+}
+
+export function buildSelectedExportRequest({ selectedIds, strategy, batchCount, skipLatest = true }) {
+  if (!Array.isArray(selectedIds) || selectedIds.length === 0) return null;
+  const confirmation = buildExportConfirmation({ range: 'selected', count: selectedIds.length, strategy, batchCount, skipLatest });
+  return { selectedIds: [...selectedIds], confirmation };
+}
+
+export function shouldSkipLatest(state, { skipLatest = true } = {}) {
+  return Boolean(skipLatest && deriveExportStatus(state) === 'latest');
+}
+
+export function capabilityControls(capabilities = {}) {
+  return { scope: capabilities.scope === true, archive: capabilities.archive === true };
 }
 
 export function preserveSelection(selected, filteredIds) {
   return new Set([...selected].filter(id => id != null));
-}
-
-export function exportStatusFor({ priorExport = false, currentVersion = null, exportedVersions = [] }) {
-  if (!priorExport && !exportedVersions.length) return 'never_exported';
-  if (currentVersion == null) return 'unknown';
-  if (exportedVersions.some(version => version === currentVersion)) return 'latest';
-  return exportedVersions.some(version => version == null) ? 'unknown' : 'has_updates';
 }
