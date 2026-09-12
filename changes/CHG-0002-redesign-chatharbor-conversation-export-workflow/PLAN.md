@@ -43,10 +43,11 @@ Micro behavior requires automated tests and independent Review. Human Browser Ve
 - [x] TASK-004: Define conservative adapter capability handling: show Scope/archive only when metadata fields exist; keep unknown content version as null.
 - [x] TASK-005: Legacy/reference shell exists; ChatHarbor product-facing shell/integration remains incremental.
 - [x] TASK-006A: Implement minimum Pilot workspace, export rail, explicit selected-export confirmation, and selected-only execution in ChatHarbor product path; Human Browser Verification PASS.
-- [ ] TASK-006B: Implement progress, cancellation, and retry integration.
+- [x] TASK-006B: Implement progress, cancellation, and retry integration.
   - [x] TASK-006B1: Progress + Cooperative Cancellation; Automated Review PASS and Human Browser Verification PASS.
   - [x] TASK-006B2: Retry; implementation, automated verification, and Independent Review PASS. Live failure-path browser evidence is deferred to an integrated workflow milestone or naturally occurring failure.
-  - [ ] TASK-006C: Full Conversation Index + Validated Cache + Incremental Refresh; integrated browser verification found an archive-coverage gap. Archive remediation implementation and automated validation complete; Independent Review pending.
+- [x] TASK-006C: Full Conversation Index + Validated Cache + Incremental Refresh; integrated browser verification found an archive-coverage gap. Personal/root archive remediation implementation, automated validation, and Independent Review PASS; focused archive browser re-verification is deferred to the layout integrated milestone.
+- [ ] TASK-006D: Accepted Workspace Layout Alignment; implementation and automated validation complete, Independent Review pending.
 - [x] TASK-007: Supersede migration of the new workspace into ChatGPT v0.4; retain v0.4 as Legacy / Reference.
 
 ## Risks
@@ -69,4 +70,4 @@ Keep ChatGPT v0.4 unchanged as Legacy / Reference. Future ChatHarbor implementat
 
 Plan completion is not Change completion. Remaining implementation slices and live acceptance still require evidence before closure.
 
-Current stop condition: Independent Review of TASK-006C Archive Coverage Remediation; do not begin later CHG-0002 capabilities until Review PASS.
+Current stop condition: Independent Review of TASK-006D Accepted Workspace Layout Alignment; do not begin later CHG-0002 capabilities until Review PASS.

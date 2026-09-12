@@ -2,10 +2,10 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 58
+state_version: 59
 current_objective:
   id: OBJ-001
-  title: Independent Review TASK-006C Archive Coverage Remediation。
+  title: Independent Review TASK-006D Accepted Workspace Layout Alignment。
 current_milestone:
   id: M0
   title: PDR Adoption / Baseline Reconstruction
@@ -15,24 +15,24 @@ active_changes:
 active_work:
 - id: CHG-0002
   status: VERIFYING
-  summary: TASK-006A and TASK-006B1 Human Browser Verification PASS；TASK-006B2 Implementation/Automated Verification/Independent Review PASS，live failure path Deferred/Unknown；TASK-006C integrated browser verification Partial PASS found active-only archive coverage; remediation implementation and automated validation complete，Independent Review pending; Project ownership remains Unknown.
+  summary: TASK-006A minimum workspace slice and TASK-006B1 Human Browser Verification PASS；TASK-006B2 Implementation/Automated Verification/Independent Review PASS，live failure path Deferred/Unknown；TASK-006C personal/root archive remediation Independent Review PASS; TASK-006D accepted workspace layout alignment implementation and automated validation complete，Independent Review pending; Project ownership remains Unknown.
 blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
 - 上游脚本 provenance、作者授权链和 license 兼容性。
 - 是否存在除当前 Git 历史外的 Trae/工作树运行配置。
 - 用户对其他当前实现的最终验收状态。
-- 实际附件文件下载、reliable contentVersion、export state/version migration、backup/restore、batch/rate/pause、TASK-006B2 retry real-browser behavior、TASK-006C archive-remediation focused browser re-verification、production UX 尚未验证。
+- 实际附件文件下载、reliable contentVersion、export state/version migration、backup/restore、batch/rate/pause、TASK-006B2 retry real-browser behavior、TASK-006C archive-remediation plus TASK-006D layout focused browser milestone、production UX 尚未验证。
 - ChatGPT Project-space contribution to the v0.4 historical total and project ownership remain TASK-003 Partial/Unknown.
 - ChatGPT 原生 reliable content revision 尚未确认；实现阶段必须保留 Unknown fallback。
 next_allowed:
-- Independent Review CHG-0002 TASK-006C Archive Coverage Remediation
-- after TASK-006C Review PASS: Governance decides whether one focused browser re-verification is required
+- Independent Review CHG-0002 TASK-006D Accepted Workspace Layout Alignment
+- after TASK-006D Review PASS: Governance decides whether one focused integrated browser milestone is required
 - do not start later batch/ZIP/attachment capabilities
 - keep unverified export, attachment, cache, and production UX capabilities as Unknown
 - verify GOV-001 provenance/license before public release
 prohibited:
 - treat historical plans as implementation evidence
 - silently override human decisions
-last_validated_commit: 738a05795d2e3f6eb6276db1dd1073cfb7678af8
+last_validated_commit: a4cc970110a6813639623c0e84a68ca532ef52d5
 last_updated: '2026-09-12'
