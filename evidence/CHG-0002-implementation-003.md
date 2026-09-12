@@ -68,3 +68,7 @@ Automated/source-confirmed: the execution controller reports total/current/compl
 ## TASK-006B1 Single-execution remediation — 2026-09-12
 
 Independent Review found a Pilot UI race: selection changes during an active run could re-enable Export, allowing concurrent controllers and ambiguous cancellation ownership. The Pilot now has an execution-active boundary: Export is disabled while running/cancelling, conversation checkboxes and Close are disabled, selection targets remain the pre-run snapshot, and all controls restore after completed/cancelled execution. The actual dist interaction rule is directly tested through the inert test hook. Core cancellation and failure semantics are unchanged. TASK-006B1 live browser verification remains Pending.
+
+## TASK-006B1 Cancel visibility remediation — 2026-09-12
+
+Human Browser Verification confirmed progress/completion and normal 3/3 completion, but explicitly observed that the Cancel action was not visible during execution. This is recorded as a real TASK-006B1 Pilot interaction-state failure, not as a timing exception. The remediation makes Cancel visibility and enabled state part of the authoritative interaction model and sets explicit `running` status before the first asynchronous fetch. Human Browser Re-verification remains Pending.

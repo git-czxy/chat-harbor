@@ -100,6 +100,10 @@ Human Browser Verification confirmed workspace opening and a 20-record first pag
 
 TASK-006A has independent Review PASS and Human Browser Verification PASS for workspace, selection, confirmation, selected-only JSON/Markdown export, and layout containment. This is not Change closure or Human Acceptance. TASK-006B1 now adds Progress + Cooperative Cancellation only; Retry remains explicitly deferred to TASK-006B2.
 
+## TASK-006B1 Cancel Visibility Remediation — 2026-09-12
+
+Human Browser Verification confirmed progress/completion but found Cancel not visible during execution. Cancel is now derived from the unified execution status model, is visible before asynchronous execution begins, remains visible but disabled while cancelling, and hides only after completed/cancelled. This remains VERIFYING pending independent Review and Human Browser Re-verification.
+
 ## TASK-006B1 Single-execution Remediation — 2026-09-12
 
 Independent Review found that selection changes during an active Pilot execution could re-enable Export and permit a second controller. The Pilot now locks Export, conversation selection, and Close while running/cancelling, retains the execution target snapshot, and restores controls after completion or cancellation. TASK-006B1 remains VERIFYING pending independent Review and live browser verification; TASK-006B2 Retry remains pending.
