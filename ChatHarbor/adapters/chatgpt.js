@@ -26,7 +26,7 @@ export function extractChatGPTMessages(raw) {
   return messages;
 }
 
-export function createChatGPTAdapter({ list, fetch, refreshAuth } = {}) {
+export function createChatGPTAdapter({ list, listPage, fetch, refreshAuth } = {}) {
   return {
     platform: 'chatgpt',
     capabilities: {
@@ -37,15 +37,23 @@ export function createChatGPTAdapter({ list, fetch, refreshAuth } = {}) {
       sources: false,
       contentRevision: false
     },
-    async detect() { return typeof list === 'function' && typeof fetch === 'function'; },
+    async detect() { return (typeof list === 'function' || typeof listPage === 'function') && typeof fetch === 'function'; },
     async refreshAuth() { return typeof refreshAuth === 'function' ? Boolean(await refreshAuth()) : false; },
+    async listPage(options = {}) {
+      const page = typeof listPage === 'function' ? await listPage(options) : { items: await list(options), offset: options.offset ?? 0 };
+      const items = page.items || [];
+      return {
+        items: items.map(raw => normalizeConversation(raw, {
+          platform: 'chatgpt', conversationId: raw.id,
+          title: raw.title, createdAt: raw.create_time,
+          updatedAt: raw.update_time
+        })),
+        offset: page.offset ?? options.offset ?? 0,
+        total: Number.isInteger(page.total) ? page.total : null
+      };
+    },
     async listConversations(options = {}) {
-      const rows = await list(options);
-      return rows.map(raw => normalizeConversation(raw, {
-        platform: 'chatgpt', conversationId: raw.id,
-        title: raw.title, createdAt: raw.create_time,
-        updatedAt: raw.update_time
-      }));
+      return (await this.listPage(options)).items;
     },
     async fetchConversation(conversationId, options = {}) {
       const raw = await fetch(conversationId, options);

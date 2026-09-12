@@ -57,3 +57,8 @@ export function capabilityControls(capabilities = {}) {
 export function preserveSelection(selected, filteredIds) {
   return new Set([...selected].filter(id => id != null));
 }
+
+export function reconcileSelectionAfterRefresh(selected, conversations) {
+  const available = new Set((conversations || []).map(conversation => conversation?.identity).filter(Boolean));
+  return new Set([...selected].filter(identity => available.has(identity)));
+}
