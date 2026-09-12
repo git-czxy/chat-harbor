@@ -44,3 +44,7 @@ Independent Review round 2 found the Core helper corrected identity translation,
 Automated/source-confirmed after this remediation: the Pilot resolves selected identities through the current list and passes bare `conversationId` values only; unresolved identities abort without fallback; selected-only and zero-selection targets are directly tested; Pilot uses canonical-message fingerprint fallback and Core-shaped manifest fields with `artifactRefs: [artifactId]`; Pilot confirmation uses `skipLatest: false`; Pilot requests one conservative page of 20 records. Legacy scripts remain unchanged.
 
 Partial Browser Evidence only: a prior Human run opened the workspace, rendered one row, and showed the zero-selection action disabled. Because this code changed afterward, selected export, multi-selection, and final browser behavior remain Pending Human Browser Verification.
+
+## Final execution parity remediation — 2026-09-12
+
+Independent Review found the previous parity check compared `exportConversation()` with itself and therefore did not execute Pilot logic. The test now loads the actual `dist/ChatHarbor-Pilot.user.js` in an inert Node VM hook and directly executes its `observe()` and `exportPair()` functions. The same fixture directly asserts fingerprint source/value and manifest parity, including artifact reference semantics. No browser verification is performed in this remediation.
