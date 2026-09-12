@@ -15,6 +15,8 @@ export function executionControls(selectedCount, status = 'idle') {
   return { active, exportEnabled: selectedCount > 0 && !active, selectionEnabled: !active, closeEnabled: !active, cancelVisible: status === 'running' || status === 'cancelling', cancelEnabled: status === 'running' };
 }
 
+export const CANCEL_BUTTON_STYLE = Object.freeze({ width: '100%', padding: '10px', border: '0', borderRadius: '8px', background: '#dc2626', color: '#fff', fontWeight: '600', cursor: 'pointer' });
+
 export function createWorkspaceModel({ conversations = [], capabilities = {}, selectedIds = new Set(), strategy = '当前速度', batchCount = 1, skipLatest = false } = {}) {
   const selected = preserveSelection(selectedIds, conversations.map(c => c.identity));
   return {

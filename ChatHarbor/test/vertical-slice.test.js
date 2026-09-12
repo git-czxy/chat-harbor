@@ -8,7 +8,7 @@ import { exportConversation } from '../export/pipeline.js';
 import { createExportState, recordObservedVersion, recordSuccessfulExport, migrateLegacyState, recoverArtifact } from '../core/export-state.js';
 import { fingerprintContent, observeContentVersion } from '../core/versioning.js';
 import { buildExportConfirmation, buildSelectedExportRequest, buildSelectedExecutionTargets, preserveSelection, shouldSkipLatest, capabilityControls, resolveSelectedConversations } from '../core/workflow.js';
-import { createWorkspaceModel, WORKSPACE_LAYOUT, executionControls } from '../ui/workspace.js';
+import { createWorkspaceModel, WORKSPACE_LAYOUT, CANCEL_BUTTON_STYLE, executionControls } from '../ui/workspace.js';
 import { createExecutionController } from '../core/execution.js';
 
 const raw = { id: 'conv-1', title: 'Original', create_time: 1, update_time: 2, mapping: { root: { id: 'root', parent: null, children: ['user-node'], message: null }, 'user-node': { id: 'user-node', parent: 'root', children: ['assistant-node'], message: { id: 'm-user', author: { role: 'user' }, content: { content_type: 'text', parts: ['Fixture user text'] }, metadata: { attachments: [{ id: 'file-1', mime_type: 'application/pdf', name: 'notes.pdf', size: 12 }] } } }, 'assistant-node': { id: 'assistant-node', parent: 'user-node', children: ['tool-node'], message: { id: 'm-assistant', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['Fixture assistant text'] } } }, 'tool-node': { id: 'tool-node', parent: 'assistant-node', children: [], message: { id: 'm-tool', author: { role: 'tool' }, content: { content_type: 'text', parts: ['hidden tool'] } } } } };
@@ -153,6 +153,8 @@ assert.equal(WORKSPACE_LAYOUT.title.textOverflow, 'ellipsis');
 assert.deepEqual(WORKSPACE_LAYOUT.rail, { minWidth: '0', minHeight: '0', overflow: 'hidden', display: 'flex', flexDirection: 'column' });
 assert.equal(WORKSPACE_LAYOUT.action.marginTop, 'auto');
 assert.equal(JSON.stringify(pilotHooks.layout), JSON.stringify(WORKSPACE_LAYOUT));
+assert.deepEqual(CANCEL_BUTTON_STYLE, { width: '100%', padding: '10px', border: '0', borderRadius: '8px', background: '#dc2626', color: '#fff', fontWeight: '600', cursor: 'pointer' });
+assert.equal(JSON.stringify(pilotHooks.cancelButtonStyle), JSON.stringify(CANCEL_BUTTON_STYLE));
 for (const status of ['running', 'cancelling']) assert.deepEqual(executionControls(2, status), { active: true, exportEnabled: false, selectionEnabled: false, closeEnabled: false, cancelVisible: true, cancelEnabled: status === 'running' });
 for (const status of ['idle', 'completed', 'cancelled']) assert.deepEqual(executionControls(2, status), { active: false, exportEnabled: true, selectionEnabled: true, closeEnabled: true, cancelVisible: false, cancelEnabled: false });
 assert.deepEqual(executionControls(0), { active: false, exportEnabled: false, selectionEnabled: true, closeEnabled: true, cancelVisible: false, cancelEnabled: false });
