@@ -3,7 +3,7 @@ id: CHG-0004
 title: Establish Version-aware Export State
 type: refactor
 size: S2
-status: VERIFYING
+status: CLOSED
 authority: human-owner
 created: 2026-09-12
 updated: '2026-09-12'
@@ -63,3 +63,7 @@ Confirmed: identity is `platform + conversationId`; title is display-only; curre
 ## Stop Condition
 
 This change is ready to close when all Acceptance Criteria have Evidence and required Human Acceptance is recorded.
+
+## Human Acceptance and Closure — 2026-09-12
+
+Independent Review: PASS. Human Acceptance was received with the statement `接受 CHG-0004 实现并授权关闭。` and is recorded in `evidence/CHG-0004-ACCEPTANCE.md`. Closure is authorized for the accepted scope only; Scope Out and Unknown capabilities remain unimplemented/unverified.
