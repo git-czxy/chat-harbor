@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-Independent Review CHG-0002 Capability Donor Arbitration and next implementation seam。
+Independent Review CHG-0002 TASK-006B2 Retry Integration。
 
 ## Active Change
 
@@ -11,11 +11,11 @@ Independent Review CHG-0002 Capability Donor Arbitration and next implementation
 
 ## Current Work
 
-TASK-006A 与 TASK-006B1 已通过对应 Human Browser Verification。CHG-0002 Capability Donor Arbitration 已完成，等待 independent Review；不自动开始 TASK-006B2 Retry。
+TASK-006A 与 TASK-006B1 已通过对应 Human Browser Verification。TASK-006B2 Retry 已完成 implementation 与 automated validation，等待 independent Review；尚未进行 TASK-006B2 Human Browser Verification。
 
 ## Stop Condition
 
-CHG-0002 当前 Stop Condition：independent Review Capability Donor Arbitration；Review PASS 前不得进入 TASK-006B2 Retry implementation。
+CHG-0002 当前 Stop Condition：independent Review TASK-006B2 Retry Integration；Review PASS 前不得进入后续 capability。
 
 ## Blocked
 
@@ -23,7 +23,7 @@ CHG-0002 当前 Stop Condition：independent Review Capability Donor Arbitration
 
 ## Next Allowed
 
-- Independent Review CHG-0002 Capability Donor Arbitration.
-- Review PASS 后才允许进入 TASK-006B2 Retry implementation。
-- Do not begin later cache/attachment slices in this turn.
+- Independent Review CHG-0002 TASK-006B2 Retry Integration.
+- Review PASS 后，Governance 决定是否需要 focused Human Browser Verification。
+- Do not begin later cache/attachment/batch/ZIP slices in this turn.
 - 可独立开展 source / license provenance 核验；公开发布前必须保留证据并经过 Human Gate。

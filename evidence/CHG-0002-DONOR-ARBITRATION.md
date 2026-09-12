@@ -60,4 +60,4 @@ Before implementing any capability:
 
 ## Immediate effect
 
-This is a planning control only. TASK-006B1 Automated Review PASS and Human Browser Verification PASS are recorded; no repeat B1 browser verification is required. Donor Arbitration awaits Independent Review. TASK-006B2 Retry remains prohibited until that Review PASS.
+This is a planning control only. TASK-006B1 Automated Review PASS and Human Browser Verification PASS are recorded; no repeat B1 browser verification is required. Capability Donor Arbitration Independent Review = PASS. TASK-006B2 Retry implementation now follows this matrix and awaits its own Independent Review; later capabilities remain prohibited.

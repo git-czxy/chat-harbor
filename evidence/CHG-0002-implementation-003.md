@@ -83,4 +83,12 @@ Local automated validation for this remediation: vertical slice tests, source/di
 
 Human Browser Verification confirmed the final Cancel interaction: the Cancel button was visibly red during active execution and effective when clicked. With 3 selected conversations, execution ended as `cancelled` at progress 1/3: success 1, failed 0, skipped 0, remaining 2. The started/current item completed while the remaining two items did not start, confirming cooperative cancellation. Export controls were restored after execution ended.
 
-This is TASK-006B1 Human Browser Verification PASS only, not Human Acceptance or CHG-0002 closure. TASK-006B2 Retry remains pending and not started.
+This is TASK-006B1 Human Browser Verification PASS only, not Human Acceptance or CHG-0002 closure. At that verification point, TASK-006B2 Retry was pending and not started; its later implementation status is recorded below.
+
+## TASK-006B2 Retry Integration — implementation and automated verification
+
+Capability Donor Arbitration Independent Review = PASS. The implementation reuses the generic exporter's bounded exponential retry policy (three total attempts; `2^attempt * 1000ms + 0–500ms` jitter), adapts the ChatGPT v0.4 single-refresh 401/403 behavior inside the Pilot ChatGPT adapter, and retains the current execution controller for progress, failure identities, and cooperative cancellation.
+
+Automated/source-confirmed: immediate success does not sleep; network and 5xx errors retry within the bound; 400/404/429 do not retry; auth refresh is attempted at most once and repeated/failed authentication is terminal; cancellation blocks the next retry attempt; failure identities map only to their original targets; a new controller retries only failed targets; retry cancellation preserves completed retry work; and the actual `dist/ChatHarbor-Pilot.user.js` retry primitive is executed by the inert VM test hook. The Pilot exposes a secondary `Retry failed N` action only after a completed/cancelled execution with failures; its retry run retains the existing progress and Cancel rail.
+
+Human Browser Verification has not been performed or claimed for TASK-006B2. No GitHub CI claim is made.
