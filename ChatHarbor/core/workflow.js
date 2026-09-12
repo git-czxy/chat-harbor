@@ -16,6 +16,12 @@ export function resolveSelectedConversations(selectedIds, conversations) {
   return conversations.filter(conversation => selected.has(conversation.identity));
 }
 
+export function buildSelectedExecutionTargets(selectedIds, conversations) {
+  const resolved = resolveSelectedConversations(selectedIds, conversations);
+  if (resolved.length !== selectedIds.length) throw new Error('Selected conversation identity could not be resolved');
+  return resolved.map(conversation => conversation.conversationId);
+}
+
 export function shouldSkipLatest(state, { skipLatest = true } = {}) {
   return Boolean(skipLatest && deriveExportStatus(state) === 'latest');
 }

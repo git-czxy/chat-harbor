@@ -15,11 +15,16 @@ export function toMarkdown(conversation) {
   return lines.join('\n');
 }
 
-export function exportConversation(conversation, { capabilities = {}, artifactId = null } = {}) {
+export function buildExportManifest(conversation, { capabilities = {}, artifactId = null, exportedAt = new Date().toISOString() } = {}) {
   const identity = conversationIdentity(conversation);
   const observed = observeContentVersion(conversation, capabilities);
   const contentVersion = observed.value;
   const resolvedArtifactId = artifactId || (contentVersion != null ? `${identity}#${contentVersion}` : `${identity}#artifact-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const manifest = { schemaVersion: EXPORT_STATE_SCHEMA, artifactVersion: 1, artifactId: resolvedArtifactId, identity, platform: conversation.platform, conversationId: conversation.conversationId, titleAtExport: conversation.title, contentVersion, contentVersionSource: observed.source, exportedAt: new Date().toISOString(), sourceUpdatedAt: conversation.updatedAt || null, representations: ['json', 'markdown'], artifactRefs: [resolvedArtifactId], attachmentManifest: conversation.attachments };
-  return { identity, artifactId: resolvedArtifactId, contentVersion, json: JSON.stringify({ ...conversation, identity, contentVersion }, null, 2), markdown: toMarkdown(conversation), manifest };
+  return { schemaVersion: EXPORT_STATE_SCHEMA, artifactVersion: 1, artifactId: resolvedArtifactId, identity, platform: conversation.platform, conversationId: conversation.conversationId, titleAtExport: conversation.title, contentVersion, contentVersionSource: observed.source, exportedAt, sourceUpdatedAt: conversation.updatedAt || null, representations: ['json', 'markdown'], artifactRefs: [resolvedArtifactId], attachmentManifest: conversation.attachments };
+}
+
+export function exportConversation(conversation, { capabilities = {}, artifactId = null } = {}) {
+  const identity = conversationIdentity(conversation);
+  const manifest = buildExportManifest(conversation, { capabilities, artifactId });
+  return { identity, artifactId: manifest.artifactId, contentVersion: manifest.contentVersion, json: JSON.stringify({ ...conversation, identity, contentVersion: manifest.contentVersion }, null, 2), markdown: toMarkdown(conversation), manifest };
 }
