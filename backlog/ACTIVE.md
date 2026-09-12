@@ -2,7 +2,7 @@
 
 ## Current Objective
 
-Independent Review CHG-0002 TASK-006B2 Retry Remediation。
+CHG-0002 TASK-006C Full Conversation Index + Validated Cache + Incremental Refresh。
 
 ## Active Change
 
@@ -11,11 +11,11 @@ Independent Review CHG-0002 TASK-006B2 Retry Remediation。
 
 ## Current Work
 
-TASK-006A 与 TASK-006B1 已通过对应 Human Browser Verification。TASK-006B2 Retry 已完成 remediation 与 automated validation，等待 independent Review；尚未进行 TASK-006B2 Human Browser Verification。
+TASK-006A 与 TASK-006B1 已通过对应 Human Browser Verification。TASK-006B2 已通过 implementation、automated verification 与 Independent Review；live failure-path browser evidence Deferred/Unknown。当前实施 TASK-006C。
 
 ## Stop Condition
 
-CHG-0002 当前 Stop Condition：independent Review TASK-006B2 Retry Remediation；Review PASS 前不得进入后续 capability。
+CHG-0002 当前 Stop Condition：TASK-006C implementation + automated validation，随后 Independent Review；不得提前开始后续能力。
 
 ## Blocked
 
@@ -23,7 +23,7 @@ CHG-0002 当前 Stop Condition：independent Review TASK-006B2 Retry Remediation
 
 ## Next Allowed
 
-- Independent Review CHG-0002 TASK-006B2 Retry Remediation.
-- Review PASS 后，Governance 决定是否需要 focused Human Browser Verification。
-- Do not begin later cache/attachment/batch/ZIP slices in this turn.
+- Implement CHG-0002 TASK-006C Full Conversation Index + Validated Cache + Incremental Refresh.
+- TASK-006C Review PASS 后，Governance 决定是否需要一次 focused Human Browser Verification。
+- Do not begin later batch/ZIP/attachment slices in this turn.
 - 可独立开展 source / license provenance 核验；公开发布前必须保留证据并经过 Human Gate。
