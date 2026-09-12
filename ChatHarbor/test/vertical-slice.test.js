@@ -31,6 +31,7 @@ assert.deepEqual(result.manifest.representations, ['json', 'markdown']);
 assert.equal(result.manifest.attachmentManifest[0].id, 'file-1');
 assert.equal(result.manifest.schemaVersion, 'chatharbor-export-state-v1');
 assert.equal(result.manifest.contentVersion, observed.value);
+assert.equal(result.manifest.sourceUpdatedAt, conversation.updatedAt);
 assert.equal(json.contentVersion, observed.value);
 assert.equal(result.manifest.platform, conversation.platform);
 assert.equal(result.manifest.conversationId, conversation.conversationId);
@@ -73,6 +74,9 @@ assert.equal(recordObservedVersion(knownEqual, observed.value).status, 'latest')
 const nullA = exportConversation({ ...conversation, messages: [] }, { artifactId: 'artifact-null-a' });
 const nullB = exportConversation({ ...conversation, messages: [] }, { artifactId: 'artifact-null-b' });
 assert.notEqual(nullA.manifest.artifactId, nullB.manifest.artifactId);
+assert.equal(nullA.manifest.contentVersion, null);
+assert.equal(nullA.manifest.artifactId, 'artifact-null-a');
+assert.ok(nullA.manifest.artifactRefs.includes('artifact-null-a'));
 let unknownState = migrateLegacyState(conversation.identity, { exported: [conversation.identity] });
 unknownState = recordSuccessfulExport(unknownState, { artifactId: nullA.artifactId, contentVersion: null, exportedAt: '2026-09-12T00:03:00Z', representations: ['json'], artifactRefs: [nullA.artifactId] });
 unknownState = recordSuccessfulExport(unknownState, { artifactId: nullB.artifactId, contentVersion: null, exportedAt: '2026-09-12T00:04:00Z', representations: ['markdown'], artifactRefs: [nullB.artifactId] });
