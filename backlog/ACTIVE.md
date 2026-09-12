@@ -6,20 +6,20 @@ CHG-0002 Export Rail + Explicit Confirmation slice。
 
 ## Active Change
 
-`CHG-0002` — Redesign ChatHarbor conversation export workflow (`BLOCKED`)
+`CHG-0002` — Redesign ChatHarbor conversation export workflow (`VERIFYING`)
 
 
 ## Current Work
 
-无已授权实施任务；CHG-0002 remains blocked and is not automatically resumed。
+CHG-0002 Slice 002 已完成，等待 independent Review；不自动开始 TASK-006B。
 
 ## Stop Condition
 
-当前 Stop Condition：保持 CHG-0002 BLOCKED，等待 independent Human Resume Authorization；不自动开启新 Change。
+CHG-0002 当前 Stop Condition：验证 Slice 002 的 product contract、测试和 Evidence；Review 前不开始 TASK-006B。
 
 ## Blocked
 
-无当前阻塞；CHG-0002 architecture dependency resolved and Human Resume Authorization received。
+无当前阻塞；architecture dependency resolved and Human Resume Authorization received。
 
 ## Next Allowed
 

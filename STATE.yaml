@@ -2,7 +2,7 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 41
+state_version: 42
 current_objective:
   id: OBJ-001
   title: 验证 CHG-0002 Export Rail + Explicit Confirmation slice。
@@ -14,8 +14,8 @@ active_changes:
 - CHG-0002
 active_work:
 - id: CHG-0002
-  status: IMPLEMENTING
-  summary: Human Resume Authorization 已收到；正在 Option C 架构下实施 selected-only Export Rail + Explicit Confirmation slice。
+  status: VERIFYING
+  summary: Option C 下的 ChatHarbor Core Export Rail + Explicit Confirmation slice 已完成，等待独立 Review。
 blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
@@ -33,5 +33,5 @@ next_allowed:
 prohibited:
 - treat historical plans as implementation evidence
 - silently override human decisions
-last_validated_commit: 17ba8114bfb54b417cdbd0e598419f498073e5f7
+last_validated_commit: d466e0bbbad3fbf08f1f2534a6cd544e45189a79
 last_updated: '2026-09-12'

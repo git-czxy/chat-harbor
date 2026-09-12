@@ -26,11 +26,11 @@ The toolbar SHALL support search, scope, archive (`unarchived` default), export 
 
 ### R4 — Identity and content version
 
-Conversation identity SHALL be `platform + conversation_id`; title SHALL never be used for identity or deduplication. Export artifacts SHALL represent a conversation content-version snapshot and include platform, full conversation ID, title-at-export, available content version/fingerprint, reliable source timestamp when available, and exported-at. A title-only change SHALL not create a new conversation.
+Conversation identity SHALL be `platform + conversationId`; title is display-only and SHALL never be used for identity, deduplication, or version signals. Content version SHALL prefer reliable native revision, otherwise use the canonical normalized-message fingerprint, otherwise remain `null / Unknown`. Export state has exactly `never_exported`, `has_updates`, `latest`, and `unknown`; UI “待导出” is a composite filter, not a fifth state. Export artifacts represent a content-version snapshot and include platform, complete conversation ID, title-at-export, content version/fingerprint, reliable source timestamp when available, and exported-at. A title-only change SHALL not create a new conversation or content version.
 
 ### R5 — Refresh and cache
 
-The index SHALL be cached. Default refresh SHOULD use an adapter-appropriate incremental strategy; full resynchronization SHALL remain available as a secondary action. A timestamp such as `updated_at` MAY be a candidate change signal only when the adapter cannot provide a stronger content signal, and the limitation SHALL be explicit.
+The index SHALL be cached. Default refresh SHOULD use an adapter-appropriate incremental strategy; full resynchronization SHALL remain available as a secondary action. `updatedAt / updated_at` MAY be used only as an incremental-refresh or adapter-side discovery hint. It SHALL NOT be treated as contentVersion, proof of content change, freshness, or latest, and SHALL NOT override Unknown.
 
 ### R6 — Export rail and confirmation
 
@@ -57,4 +57,4 @@ Progress SHALL show total progress, batch position, current conversation, succes
 
 | Requirement | Acceptance Check | Evidence |
 |---|---|---|
-| R1–R7 | Source review + later UI/runtime acceptance | Pending implementation Change |
+| R1–R7 | Source review + slice-specific automated/live evidence | CHG-0002 implementation evidence |

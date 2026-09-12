@@ -24,8 +24,8 @@ Implement in vertical slices around the Core/Adapter boundary. Do not route new 
 - [x] TASK-002: Specify target workflow and acceptance model.
 - [ ] TASK-003: Record archived ChatGPT project metadata as source-confirmed/partial/unknown; do not block this slice unless required for correctness.
 - [x] TASK-004: Define conservative adapter capability handling: show Scope/archive only when metadata fields exist; keep unknown content version as null.
-- [x] TASK-005: Implement generic workspace shell and logical list/selection model.
-- [x] TASK-006A: Implement minimum export rail and explicit selected-export confirmation.
+- [x] TASK-005: Legacy/reference shell exists; ChatHarbor product-facing shell/integration remains incremental.
+- [ ] TASK-006A: Implement minimum export rail and explicit selected-export confirmation in ChatHarbor product path.
 - [ ] TASK-006B: Implement progress, cancellation, and retry integration.
 - [x] TASK-007: Supersede migration of the new workspace into ChatGPT v0.4; retain v0.4 as Legacy / Reference.
 
