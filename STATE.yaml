@@ -2,10 +2,10 @@ schema_version: 0.1
 project:
   name: ai-chat-exporter
   status: active
-state_version: 45
+state_version: 46
 current_objective:
   id: OBJ-001
-  title: 独立 Review CHG-0002 TASK-006A remediation。
+  title: 独立 Review CHG-0002 TASK-006A final execution remediation。
 current_milestone:
   id: M0
   title: PDR Adoption / Baseline Reconstruction
@@ -15,7 +15,7 @@ active_changes:
 active_work:
 - id: CHG-0002
   status: VERIFYING
-  summary: TASK-006A identity translation、Core pipeline parity、保守 skip policy 与 Pilot 多选边界 remediation 已完成自动验证，等待独立 Review；Human Browser Verification 仍为 Partial/Pending。
+  summary: TASK-006A Pilot execution identity、Core pipeline parity 与 selected-only target remediation 已完成自动验证，等待独立 Review；Review PASS 前不进行 Human Browser Verification。
 blocked: []
 unknowns:
 - 真实网站上的导出成功率、各平台当前接口兼容性和 UI 重叠行为。
@@ -27,12 +27,12 @@ unknowns:
 - ChatGPT 原生 reliable content revision 尚未确认；实现阶段必须保留 Unknown fallback。
 next_allowed:
 - independent Review CHG-0002 TASK-006A remediation
-- limited Human Browser Verification after Review
+- limited Human Browser Verification only after Review PASS
 - keep later progress/cancel/retry/cache/attachment capabilities out of scope
 - keep unverified export, attachment, cache, and production UX capabilities as Unknown
 - verify GOV-001 provenance/license before public release
 prohibited:
 - treat historical plans as implementation evidence
 - silently override human decisions
-last_validated_commit: 1478e92
+last_validated_commit: 29932e9
 last_updated: '2026-09-12'
