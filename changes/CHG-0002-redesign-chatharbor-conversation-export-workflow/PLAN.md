@@ -25,7 +25,7 @@ Implement in vertical slices around the Core/Adapter boundary. Do not route new 
 - [ ] TASK-003: Record archived ChatGPT project metadata as source-confirmed/partial/unknown; do not block this slice unless required for correctness.
 - [x] TASK-004: Define conservative adapter capability handling: show Scope/archive only when metadata fields exist; keep unknown content version as null.
 - [x] TASK-005: Legacy/reference shell exists; ChatHarbor product-facing shell/integration remains incremental.
-- [ ] TASK-006A: Implement minimum export rail and explicit selected-export confirmation in ChatHarbor product path.
+- [x] TASK-006A: Implement minimum Pilot workspace, export rail, explicit selected-export confirmation, and selected-only execution in ChatHarbor product path; browser verification remains pending.
 - [ ] TASK-006B: Implement progress, cancellation, and retry integration.
 - [x] TASK-007: Supersede migration of the new workspace into ChatGPT v0.4; retain v0.4 as Legacy / Reference.
 
@@ -49,4 +49,4 @@ Keep ChatGPT v0.4 unchanged as Legacy / Reference. Future ChatHarbor implementat
 
 Plan completion is not Change completion. Remaining implementation slices and live acceptance still require evidence before closure.
 
-Current stop condition: verify TASK-006A with automated evidence and limited runtime evidence; keep later workflow slices out of scope.
+Current stop condition: independent Review and limited Human Browser Verification of TASK-006A; keep later workflow slices out of scope.

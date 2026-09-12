@@ -6,7 +6,7 @@ size: S2
 status: VERIFYING
 authority: human-owner
 created: 2026-09-11
-updated: '2026-09-11'
+updated: '2026-09-12'
 ---
 
 # CHG-0002 — Redesign ChatHarbor conversation export workflow
@@ -31,6 +31,7 @@ Implement a Desktop-first single main workspace: the conversation list is the pr
 
 - Implement the confirmed Desktop-first workspace workflow in incremental slices.
 - Preserve current export capabilities while routing the new workflow through ChatHarbor Core/Adapters.
+- TASK-006A: deliver the minimum ChatHarbor Pilot workspace, selected-export rail, explicit confirmation, and selected-only execution.
 
 ### Out
 
@@ -71,10 +72,14 @@ The Change is intentionally paused after a real-site review exposed possible bas
 
 DEC-0002 now accepts Option C. Architecture dependency is resolved by CHG-0003, but CHG-0002 remains BLOCKED pending independent Human Resume Authorization; its confirmed UX Specification and Decisions remain valid.
 
+## Review Baseline — 2026-09-12
+
+Slice 002 remediation independent Review is PASS. TASK-006A is the current implementation slice; this Change remains VERIFYING pending independent Review and Human Browser Verification. No Human Acceptance has been recorded.
+
 ## Stop Condition
 
 This change is ready to close when all Acceptance Criteria have Evidence and required Human Acceptance is recorded.
 
 ## Current Slice — Export Rail + Explicit Confirmation
 
-This slice is complete only when selected export is explicit, zero selection is disabled, confirmation fields are tested, and the four-state/Unknown semantics remain conservative. Progress, cancel, retry, cache, attachment download, and other later slices remain open.
+This slice is complete only when the ChatHarbor product path provides the Pilot workspace, selected-only execution, explicit confirmation, and conservative four-state/Unknown semantics. Progress, cancel, retry, cache, attachment download, and other later slices remain open.
