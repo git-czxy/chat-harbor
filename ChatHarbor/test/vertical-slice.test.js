@@ -5,6 +5,7 @@ import { conversationIdentity, normalizeConversation } from '../models/conversat
 import { exportConversation } from '../export/pipeline.js';
 import { createExportState, recordObservedVersion, recordSuccessfulExport, migrateLegacyState, recoverArtifact } from '../core/export-state.js';
 import { fingerprintContent, observeContentVersion } from '../core/versioning.js';
+import { buildExportConfirmation, preserveSelection, exportStatusFor } from '../core/workflow.js';
 
 const raw = { id: 'conv-1', title: 'Original', create_time: 1, update_time: 2, mapping: { root: { id: 'root', parent: null, children: ['user-node'], message: null }, 'user-node': { id: 'user-node', parent: 'root', children: ['assistant-node'], message: { id: 'm-user', author: { role: 'user' }, content: { content_type: 'text', parts: ['Fixture user text'] }, metadata: { attachments: [{ id: 'file-1', mime_type: 'application/pdf', name: 'notes.pdf', size: 12 }] } } }, 'assistant-node': { id: 'assistant-node', parent: 'user-node', children: ['tool-node'], message: { id: 'm-assistant', author: { role: 'assistant' }, content: { content_type: 'text', parts: ['Fixture assistant text'] } } }, 'tool-node': { id: 'tool-node', parent: 'assistant-node', children: [], message: { id: 'm-tool', author: { role: 'tool' }, content: { content_type: 'text', parts: ['hidden tool'] } } } } };
 const adapter = createChatGPTAdapter({ list: async () => [raw], fetch: async () => raw });
@@ -92,4 +93,11 @@ assert.deepEqual(recoverArtifact(createExportState(conversation.identity), { ide
 const native = observeContentVersion({ ...conversation, contentVersion: 'native-rev-1' }, { contentRevision: true });
 assert.deepEqual(native, { value: 'native-rev-1', source: 'native', confidence: 'platform' });
 assert.deepEqual(observeContentVersion({ ...conversation, messages: [] }, { contentRevision: false }).value, null);
+const confirmation = buildExportConfirmation({ range: 'selected', count: 2, strategy: '较慢', batchCount: 1, skipLatest: true });
+assert.deepEqual(confirmation, { range: 'selected', count: 2, strategy: '较慢', batchCount: 1, skipLatest: true });
+assert.deepEqual([...preserveSelection(new Set(['conv-1', 'conv-2']), ['conv-1'])], ['conv-1', 'conv-2']);
+assert.equal(exportStatusFor({}), 'never_exported');
+assert.equal(exportStatusFor({ priorExport: true, currentVersion: 'v2', exportedVersions: [null] }), 'unknown');
+assert.equal(exportStatusFor({ currentVersion: 'v2', exportedVersions: ['v1'] }), 'has_updates');
+assert.equal(exportStatusFor({ currentVersion: 'v1', exportedVersions: ['v1'] }), 'latest');
 console.log('vertical slice PASS');
