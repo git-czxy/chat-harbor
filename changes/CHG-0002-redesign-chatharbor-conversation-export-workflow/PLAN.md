@@ -68,4 +68,4 @@ Keep ChatGPT v0.4 unchanged as Legacy / Reference. Future ChatHarbor implementat
 
 Plan completion is not Change completion. Remaining implementation slices and live acceptance still require evidence before closure.
 
-Current stop condition: independent Review of TASK-006B1 Progress + Cooperative Cancellation; do not start TASK-006B2 Retry.
+Current stop condition: independent Review of CHG-0002 Capability Donor Arbitration; do not start TASK-006B2 Retry until Review PASS.
