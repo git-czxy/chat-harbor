@@ -30,6 +30,22 @@ export function buildFailedExecutionTargets(failures, targets) {
   return resolved;
 }
 
+export function reconcileRetryFailures(previousFailures, retryTargets, succeededIdentities, currentFailures) {
+  const targetIds = new Set((retryTargets || []).map(target => target?.identity).filter(Boolean));
+  const previous = new Map((previousFailures || []).map(failure => [failure?.identity, failure]).filter(([identity]) => Boolean(identity)));
+  for (const identity of previous.keys()) if (!targetIds.has(identity)) throw new Error('Failed conversation identity could not be resolved');
+  const remaining = new Map(previous);
+  for (const identity of new Set(succeededIdentities || [])) {
+    if (!targetIds.has(identity)) throw new Error('Succeeded conversation identity could not be resolved');
+    remaining.delete(identity);
+  }
+  for (const failure of currentFailures || []) {
+    if (!failure?.identity || !targetIds.has(failure.identity)) throw new Error('Failed conversation identity could not be resolved');
+    remaining.set(failure.identity, failure);
+  }
+  return [...remaining.values()];
+}
+
 export function shouldSkipLatest(state, { skipLatest = true } = {}) {
   return Boolean(skipLatest && deriveExportStatus(state) === 'latest');
 }

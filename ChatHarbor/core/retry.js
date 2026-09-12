@@ -26,6 +26,7 @@ export async function retryOperation(operation, {
     try { return await operation(); }
     catch (error) {
       lastError = error;
+      if (isCancelRequested()) throw new RetryCancelledError();
       const status = statusOf(error);
       if ((status === 401 || status === 403) && attempt < maxAttempts && !refreshedAuth && typeof refreshAuth === 'function') {
         refreshedAuth = true;
@@ -38,6 +39,7 @@ export async function retryOperation(operation, {
       if (!isRetryableError(error) || attempt === maxAttempts) throw error;
       const delay = (2 ** attempt) * 1000 + Math.floor(random() * 501);
       onRetry({ attempt, delay, error });
+      if (isCancelRequested()) throw new RetryCancelledError();
       await sleep(delay);
       if (isCancelRequested()) throw new RetryCancelledError();
     }
