@@ -19,7 +19,7 @@ async function listProjectSpaceConversations(){ return mockProjectList; }
 async function listConversations(){ return mockRootList; }
 global.document={getElementById:()=>null};
 global.localStorage={getItem:()=>null,setItem:()=>{}};
-const snippet = fs.readFileSync('/mnt/data/chatharbor_stage4/integrated_sync_layer.js','utf8');
+const snippet = fs.readFileSync(require('path').join(__dirname,'integrated_sync_layer.js'),'utf8');
 eval(snippet);
 
 function rec(id,title,t,tracking='manifest') {

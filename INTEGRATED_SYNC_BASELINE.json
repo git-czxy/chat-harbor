@@ -1,7 +1,7 @@
 {
   "product": "ChatHarbor",
   "build": "Integrated Version-aware Selective Sync",
-  "status": "READY_FOR_ONE_TIME_REAL_ENV_ACCEPTANCE",
+  "status": "AUTOMATED_REGRESSION_PASS_REAL_UI_SMOKE_REQUIRED",
   "date": "2026-09-14",
   "clean_upstream": {
     "repository": "huhusmang/ChatGPT-Exporter",
@@ -39,11 +39,21 @@
     "20-item default detail-fetch batching with randomized inter-batch pause",
     "retry policy for retryable detail-fetch errors",
     "cooperative pause / resume / safe cancellation controls",
-    "active-run navigation guard"
+    "active-run navigation guard",
+    "Desktop-first single-page workspace UI",
+    "responsive 1240px-class wide layout with independent conversation-list scrolling",
+    "right-rail local archive / network policy / sync content / primary actions",
+    "green persisted right-edge half-hidden launcher with new ChatHarbor storage key",
+    "single-window space switching (personal/project/team)",
+    "project/archive/sync-status/time filters in compact toolbar",
+    "Shift+click range selection with selection preserved across filtering",
+    "inline Chinese/English preflight and sync summaries with copyable detailed report",
+    "progress / pause / cancel moved into right rail instead of list area",
+    "primary launcher opens workspace directly instead of the legacy space chooser"
   ],
   "explicitly_not_in_this_stage": [
-    "final zh-CN/en-US resource refactor",
-    "removal of upstream ZIP compatibility UI/code",
+    "full localization of every inherited upstream string outside ChatHarbor-owned UI",
+    "removal of inherited upstream ZIP implementation/dependency",
     "ZIP snapshot feature"
   ],
   "authority": {
@@ -52,7 +62,7 @@
     "local_only_auto_delete": false,
     "untracked_legacy_asset_auto_delete": false
   },
-  "integrated_build_version": "0.0.7.0",
+  "integrated_build_version": "0.0.8.0",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,
@@ -62,5 +72,19 @@
     ],
     "pause_semantics": "finish in-flight request, then no new detail request or conversation transaction",
     "cancel_semantics": "stop at safe boundary; completed per-conversation commits remain authoritative"
-  }
+  },
+  "ui": {
+    "layout": "Desktop-first single-page workspace",
+    "width": "min(1240px, calc(100vw - 48px))",
+    "height": "min(820px, calc(100vh - 48px))",
+    "launcher": "44px green, right-edge default at 45% viewport height, half-hidden when idle, position persisted",
+    "reporting": "inline right-rail summary; no dedicated report modal",
+    "primary_actions": [
+      "sync selected",
+      "sync filtered",
+      "sync all"
+    ],
+    "legacy_space_chooser_primary_entry": false
+  },
+  "core_literal_sha256": "f4c01a1e3c2f94e3572fe76d1263f0c4ab3ea29a3c64b121482b6b2eab6122cc"
 }

@@ -35,7 +35,7 @@ function chBuildPreflightPlan(){throw new Error('not used');}
 async function chScanLocalArchiveReadOnly(){throw new Error('not used');}
 async function chReadManifest(){throw new Error('not used');}
 
-const layer=fs.readFileSync('/mnt/data/chatharbor_stage4/integrated_sync_layer.js','utf8');
+const layer=fs.readFileSync(require('path').join(__dirname,'integrated_sync_layer.js'),'utf8');
 eval(layer);
 chContentSignature = async (c)=> c.__sig || 'sig';
 

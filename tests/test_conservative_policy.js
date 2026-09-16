@@ -13,7 +13,7 @@ function generateUniqueFilename(c){return `${c.title||'T'}_${c.conversation_id||
 function generateMarkdownFilename(c){return generateUniqueFilename(c).replace(/\.json$/,'.md');}
 function convertConversationToMarkdown(){return '';}
 function sanitizeFilename(x){return x;}
-const layer=fs.readFileSync('/mnt/data/chatharbor_stage4/integrated_sync_layer.js','utf8');
+const layer=fs.readFileSync(require('path').join(__dirname,'integrated_sync_layer.js'),'utf8');
 eval(layer);
 
 (async()=>{
@@ -39,7 +39,7 @@ eval(layer);
   await assert.rejects(()=>chControlCheckpoint('test-cancel'), e=>e && e.code==='CHATHARBOR_CANCELLED');
   chEndControlledRun();
 
-  const patcher=fs.readFileSync('/mnt/data/chatharbor_integrated_sync_070/ChatHarbor_IntegratedSync_patch.py','utf8');
+  const patcher=fs.readFileSync(require('path').join(__dirname,'..','ChatHarbor_IntegratedSync_patch.py'),'utf8');
   for (const marker of ['ch-pause-sync-btn','ch-cancel-sync-btn','同步仍在运行','controlsDisabled = state.loading || chSyncRun.active','batchPauseMinSec: 180','batchPauseMaxSec: 300']) {
     assert(patcher.includes(marker),`missing static marker: ${marker}`);
   }
