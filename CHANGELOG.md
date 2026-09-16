@@ -1,5 +1,12 @@
 # ChatHarbor Changelog
 
+## 0.0.11.3 — 2026-09-15
+
+- Fixed the release-build invariant that still expected the obsolete UI phrase `按选择范围开始流式核验与写入`, while 0.0.11.1+ runtime wording had already changed to `按实际待处理范围开始流式核验与写入`.
+- This mismatch made `prepare_clean_integrated_sync.ps1` fail closed after downloading and patching the frozen upstream baseline.
+- Added a regression assertion that parses `required_runtime_markers` and verifies the invariant marker follows the current runtime wording, preventing the same packaging-contract drift.
+- No synchronization, Manifest, Remote Index cache, attachment, or network-policy semantics changed from 0.0.11.2.
+
 ## 0.0.11.2 — 2026-09-15
 
 - Fixed release metadata: the 0.0.11.1 package accidentally still generated `@version 0.0.11.0`, so Tampermonkey could keep the prior runtime. 0.0.11.2 now has an explicit version bump and build-time assertion.

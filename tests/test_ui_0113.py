@@ -98,10 +98,21 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.11.2' in source
-assert '// @version      0.0.11.2' in source
+assert '0.0.11.3' in source
+assert '// @version      0.0.11.3' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v2';" in source
 assert 'background: #10a37f;' in source
+
+# Release-build invariant contract: the runtime marker must match the current UI wording.
+required_runtime_markers_value = None
+for node in ast.walk(tree):
+    if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id == 'required_runtime_markers':
+        required_runtime_markers_value = ast.literal_eval(node.value)
+        break
+assert required_runtime_markers_value is not None
+assert '按实际待处理范围开始流式核验与写入' in required_runtime_markers_value
+assert '按选择范围开始流式核验与写入' not in required_runtime_markers_value
+print('PASS release-build invariant marker matches current actionable-work wording')
 assert 'fabCollapseTimer = setTimeout' in source
 assert '复制详细报告' in values['inline_report_helpers']
 assert 'ch-archive-copy-report-btn' in values['preflight_report_block']

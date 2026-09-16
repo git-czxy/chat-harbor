@@ -35,7 +35,7 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.11.2\n"
+    "// @version      0.0.11.3\n"
     "// @description  Clean-lineage archive sync with convergent incremental compare, Manifest-first local indexing, attachment completeness, and cached remote-index fast refresh.\n"
     "// @description:zh-CN 干净来源的本地档案同步：收敛式增量比较、Manifest-first 本地索引、附件完整性与远端索引缓存快速刷新。\n"
     "// @author       huhu; ChatHarbor contributors\n"
@@ -2988,7 +2988,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.11.2 Installation + Runtime UX hotfix on Incremental Convergence ========================
+# ======================== ChatHarbor 0.0.11.3 Build-Invariant Hotfix on Incremental Convergence ========================
 # The sync/runtime core above remains unchanged. This final bounded patch replaces only the
 # picker presentation, report presentation, and launcher presentation.
 
@@ -3719,7 +3719,7 @@ required_runtime_markers = [
     "grid-template-columns:minmax(0,1fr) 310px",
     "const FAB_STORAGE_KEY = 'chatharbor-fab-v2';",
     "chReconcileRuntimeState",
-    "按选择范围开始流式核验与写入",
+    "按实际待处理范围开始流式核验与写入",
     "accountUniverse",
     "待处理",
 ]

@@ -93,7 +93,7 @@
     "remote_absence_requires_complete_universe": true,
     "remote_list_checkpoint": "remote_list_* Manifest observation fields"
   },
-  "integrated_build_version": "0.0.11.2",
+  "integrated_build_version": "0.0.11.3",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,
