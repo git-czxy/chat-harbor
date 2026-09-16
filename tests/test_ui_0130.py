@@ -102,8 +102,8 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.12.0' in source
-assert '// @version      0.0.12.0' in source
+assert '0.0.13.0' in source
+assert '// @version      0.0.13.0' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v2';" in source
 assert 'background: #10a37f;' in source
 
@@ -206,7 +206,7 @@ assert "`${chT('本地','Local')} ${s.local || 0}（${chT('项目内','in projec
 print('PASS current-item progress wording + archived amber badge')
 
 
-# 0.0.12.0 cross-cutting invariants.
+# 0.0.13.0 cross-cutting invariants.
 assert 'remoteRefreshPromise' in picker
 assert 'pendingRemoteSnapshot' in picker
 assert 'await state.remoteRefreshPromise' in picker
@@ -231,3 +231,17 @@ print('PASS shared backend scheduler + global cooldown markers')
 print('PASS remote-refresh single-flight / run snapshot freeze markers')
 print('PASS physical attachment integrity + manifest rollback markers')
 print('PASS commit-accurate UI status markers')
+
+assert 'CH_BACKEND_LANE_DISCOVERY' in core
+assert 'CH_BACKEND_LANE_DETAIL' in core
+assert 'CH_BACKEND_LANE_ATTACHMENT' in core
+assert 'CH_DISCOVERY_BASE_MS = 600' in core
+assert 'CH_ATTACHMENT_META_BASE_MS = 1500' in core
+assert 'partial-root' in core and 'partial-projects' in core
+assert 'progressive incomplete remote index' in core
+assert 'chSetNetworkStatusHook' in core
+assert 'state.loading && !state.list.length' in picker
+assert "cached&&Array.isArray(cached.list)&&cached.list.length" in picker
+assert "远端索引不完整，已保留可用缓存" in picker
+assert "该速度用于对话详情；远端列表与附件元数据使用独立轻量节奏" in picker
+print('PASS lane-aware scheduler + progressive remote-index loading + incomplete cache recovery')

@@ -35,9 +35,9 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.12.0\n"
-    "// @description  Clean-lineage archive sync with convergent incremental compare, Manifest-first indexing, incremental attachments, shared backend request scheduling, global cooldown, commit-accurate UI state, and cached remote-index fast refresh.\n"
-    "// @description:zh-CN 干净来源的本地档案同步：收敛式增量比较、Manifest-first 索引、附件增量补齐、统一后端请求调度、全局限流冷却、提交准确状态与远端索引缓存快速刷新。\n"
+    "// @version      0.0.13.0\n"
+    "// @description  Clean-lineage archive sync with convergent incremental compare, Manifest-first indexing, incremental attachments, lane-aware backend scheduling, global 429 cooldown, progressive remote discovery, commit-accurate UI state, and cached remote-index fast refresh.\n"
+    "// @description:zh-CN 干净来源的本地档案同步：收敛式增量比较、Manifest-first 索引、附件增量补齐、分级后端调度、全局 429 冷却、渐进式远端发现、提交准确状态与远端索引缓存快速刷新。\n"
     "// @author       huhu; ChatHarbor contributors\n"
 )
 
@@ -158,18 +158,42 @@ directory_writer = r'''
     }
 
     // ======================== Shared ChatHarbor Backend Scheduler ========================
-    // Every ChatHarbor control-plane request to /backend-api/ must pass this scheduler.
-    // It serializes requests, applies the selected conservative cadence, shares 429 cooldown
-    // across discovery/detail/attachment-metadata paths, and keeps signed binary downloads
-    // outside the control-plane throttle.
+    // One scheduler owns serialization, global HTTP 429 cooldown and retry classification,
+    // but request lanes keep different cadences. Discovery must remain responsive; expensive
+    // conversation detail remains conservative; attachment metadata is rate-limited without
+    // inheriting the full detail delay. Signed/direct binary transfers remain a separate path.
     const chRawChatHarborFetch = window.fetch.bind(window);
+    const CH_BACKEND_LANE_DISCOVERY = 'discovery';
+    const CH_BACKEND_LANE_DETAIL = 'detail';
+    const CH_BACKEND_LANE_ATTACHMENT = 'attachment';
+    const CH_DISCOVERY_BASE_MS = 600;
+    const CH_DISCOVERY_JITTER_MS = 400;
+    const CH_ATTACHMENT_META_BASE_MS = 1500;
+    const CH_ATTACHMENT_META_JITTER_MS = 1000;
     const chBackendScheduler = {
         tail: Promise.resolve(),
-        nextAllowedAt: 0,
         cooldownUntil: 0,
         cooldownReason: null,
-        requestCount: 0
+        laneNextAllowedAt: {
+            discovery: 0,
+            detail: 0,
+            attachment: 0
+        },
+        laneRequestCount: {
+            discovery: 0,
+            detail: 0,
+            attachment: 0
+        }
     };
+    let chNetworkStatusHook = null;
+
+    function chSetNetworkStatusHook(fn) {
+        chNetworkStatusHook = typeof fn === 'function' ? fn : null;
+    }
+
+    function chEmitNetworkStatus(info = null) {
+        try { if (chNetworkStatusHook) chNetworkStatusHook(info); } catch (_) {}
+    }
 
     function chIsBackendControlUrl(resource) {
         try {
@@ -181,8 +205,34 @@ directory_writer = r'''
         }
     }
 
+    function chBackendLaneFor(resource) {
+        try {
+            const url = resource instanceof Request ? resource.url : String(resource || '');
+            const parsed = new URL(url, location.origin);
+            const path = parsed.pathname;
+            if (/^\/backend-api\/conversations\/?$/i.test(path)) return CH_BACKEND_LANE_DISCOVERY;
+            if (/^\/backend-api\/gizmos(?:\/|$)/i.test(path)) return CH_BACKEND_LANE_DISCOVERY;
+            if (/^\/backend-api\/files\/download\//i.test(path)) return CH_BACKEND_LANE_ATTACHMENT;
+            if (/\/interpreter\/download$/i.test(path)) return CH_BACKEND_LANE_ATTACHMENT;
+            if (/^\/backend-api\/conversation\/[^/]+\/?$/i.test(path)) return CH_BACKEND_LANE_DETAIL;
+            return CH_BACKEND_LANE_DETAIL;
+        } catch (_) {
+            return CH_BACKEND_LANE_DETAIL;
+        }
+    }
+
     function chBackendPolicy() {
         return chNormalizeNetworkPolicy(chSyncRun?.active ? chSyncRun.policy : chLoadNetworkPolicy());
+    }
+
+    function chLaneDelayMs(lane, policy) {
+        if (lane === CH_BACKEND_LANE_DISCOVERY) {
+            return CH_DISCOVERY_BASE_MS + Math.random() * CH_DISCOVERY_JITTER_MS;
+        }
+        if (lane === CH_BACKEND_LANE_ATTACHMENT) {
+            return CH_ATTACHMENT_META_BASE_MS + Math.random() * CH_ATTACHMENT_META_JITTER_MS;
+        }
+        return chNetworkDelayMs(policy);
     }
 
     async function chSchedulerSleep(ms, primary = '', secondary = '', countdown = false) {
@@ -193,8 +243,11 @@ directory_writer = r'''
         }
         const deadline = Date.now() + duration;
         while (Date.now() < deadline) {
-            await sleep(Math.min(1000, Math.max(1, deadline - Date.now())));
+            const remaining = Math.max(0, deadline - Date.now());
+            chEmitNetworkStatus({ primary, secondary, countdown, remainingMs: remaining });
+            await sleep(Math.min(1000, Math.max(1, remaining)));
         }
+        chEmitNetworkStatus(null);
     }
 
     async function chWithBackendSerial(task) {
@@ -206,38 +259,49 @@ directory_writer = r'''
         finally { try { release(); } catch (_) {} }
     }
 
-    async function chWaitForBackendGate(label = '') {
+    async function chWaitForBackendGate(label = '', lane = CH_BACKEND_LANE_DETAIL) {
         const now = Date.now();
-        const deadline = Math.max(chBackendScheduler.nextAllowedAt || 0, chBackendScheduler.cooldownUntil || 0);
+        const laneDeadline = Number(chBackendScheduler.laneNextAllowedAt?.[lane] || 0);
+        const cooldownDeadline = Number(chBackendScheduler.cooldownUntil || 0);
+        const deadline = Math.max(laneDeadline, cooldownDeadline);
         if (deadline <= now) {
-            if ((chBackendScheduler.cooldownUntil || 0) <= now) {
+            if (cooldownDeadline <= now) {
                 chBackendScheduler.cooldownUntil = 0;
                 chBackendScheduler.cooldownReason = null;
             }
+            chEmitNetworkStatus(null);
             return;
         }
         const waitMs = deadline - now;
-        const is429 = chBackendScheduler.cooldownReason === 'HTTP_429' && chBackendScheduler.cooldownUntil >= deadline;
+        const is429 = chBackendScheduler.cooldownReason === 'HTTP_429' && cooldownDeadline >= deadline;
+        const laneLabel = lane === CH_BACKEND_LANE_DISCOVERY ? '远端索引' : lane === CH_BACKEND_LANE_ATTACHMENT ? '附件元数据' : '对话详情';
         await chSchedulerSleep(
             waitMs,
             is429 ? 'API 限流（429）' : '请求间隔',
-            `${label ? `${label} · ` : ''}${is429 ? '全局冷却后继续' : '统一后端请求调度'}`,
+            `${label ? `${label} · ` : ''}${is429 ? '全局冷却后继续' : `${laneLabel}调度`}`,
             is429
         );
     }
 
-    function chAfterBackendAttempt(policy) {
+    function chAfterBackendAttempt(policy, lane) {
         const p = chNormalizeNetworkPolicy(policy);
-        chBackendScheduler.requestCount += 1;
-        let delay = chNetworkDelayMs(p);
-        if (chBackendScheduler.requestCount % p.batchSize === 0) {
+        chBackendScheduler.laneRequestCount[lane] = Number(chBackendScheduler.laneRequestCount[lane] || 0) + 1;
+        let delay = chLaneDelayMs(lane, p);
+        // Batch pauses belong only to expensive conversation-detail traffic. Discovery and
+        // attachment metadata have their own lightweight lane cadence and never consume the
+        // detail batch counter.
+        if (lane === CH_BACKEND_LANE_DETAIL && chBackendScheduler.laneRequestCount[lane] % p.batchSize === 0) {
             delay = Math.max(delay, chNetworkBatchPauseMs(p));
         }
-        chBackendScheduler.nextAllowedAt = Math.max(chBackendScheduler.nextAllowedAt || 0, Date.now() + delay);
+        chBackendScheduler.laneNextAllowedAt[lane] = Math.max(
+            Number(chBackendScheduler.laneNextAllowedAt[lane] || 0),
+            Date.now() + delay
+        );
     }
 
     async function chBackendFetch(resource, options = {}) {
         if (!chIsBackendControlUrl(resource)) return chRawChatHarborFetch(resource, options);
+        const lane = chBackendLaneFor(resource);
         return chWithBackendSerial(async () => {
             const policy = chBackendPolicy();
             const maxAttempts = 1 + policy.maxRetries;
@@ -245,24 +309,22 @@ directory_writer = r'''
             let lastResponse = null;
             for (let attempt = 1; attempt <= maxAttempts; attempt++) {
                 if (chSyncRun?.active) await chControlCheckpoint('backend-request');
-                await chWaitForBackendGate();
+                await chWaitForBackendGate('', lane);
                 try {
                     const response = await chRawChatHarborFetch(resource, options);
                     lastResponse = response;
-                    chAfterBackendAttempt(policy);
+                    chAfterBackendAttempt(policy, lane);
                     const status = Number(response?.status || 0);
                     if (status === 429) {
                         const retryMs = 120000 * Math.max(1, attempt);
                         chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
                         chBackendScheduler.cooldownReason = 'HTTP_429';
                         if (attempt < maxAttempts) {
-                            await chWaitForBackendGate(`第 ${attempt}/${policy.maxRetries} 次重试前`);
+                            await chWaitForBackendGate(`第 ${attempt}/${policy.maxRetries} 次重试前`, lane);
                             continue;
                         }
                     } else if (status >= 500 && status <= 599 && attempt < maxAttempts) {
                         const retryMs = 30000 * Math.max(1, attempt);
-                        chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
-                        chBackendScheduler.cooldownReason = 'HTTP_5XX';
                         await chSchedulerSleep(retryMs, '网络异常，保守重试等待', `HTTP ${status} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
                         continue;
                     }
@@ -270,11 +332,9 @@ directory_writer = r'''
                 } catch (err) {
                     if (chIsCancellation(err)) throw err;
                     lastError = err;
-                    chAfterBackendAttempt(policy);
+                    chAfterBackendAttempt(policy, lane);
                     if (attempt >= maxAttempts) break;
                     const retryMs = 30000 * Math.max(1, attempt);
-                    chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
-                    chBackendScheduler.cooldownReason = 'NETWORK';
                     await chSchedulerSleep(retryMs, '网络异常，保守重试等待', `第 ${attempt}/${policy.maxRetries} 次重试前`, true);
                 }
             }
@@ -290,8 +350,7 @@ directory_writer = r'''
         let lastResponse = null;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             if (chSyncRun?.active) await chControlCheckpoint('binary-transfer');
-            // Respect any global backend 429 cooldown, but do not apply normal control-plane spacing.
-            if ((chBackendScheduler.cooldownUntil || 0) > Date.now()) await chWaitForBackendGate('附件数据下载');
+            if ((chBackendScheduler.cooldownUntil || 0) > Date.now()) await chWaitForBackendGate('附件数据下载', CH_BACKEND_LANE_ATTACHMENT);
             try {
                 const response = await chRawChatHarborFetch(resource, options);
                 lastResponse = response;
@@ -300,7 +359,7 @@ directory_writer = r'''
                     const retryMs = 120000 * Math.max(1, attempt);
                     chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
                     chBackendScheduler.cooldownReason = 'HTTP_429';
-                    if (attempt < maxAttempts) { await chWaitForBackendGate(`附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`); continue; }
+                    if (attempt < maxAttempts) { await chWaitForBackendGate(`附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`, CH_BACKEND_LANE_ATTACHMENT); continue; }
                 } else if (status >= 500 && status <= 599 && attempt < maxAttempts) {
                     const retryMs = 30000 * Math.max(1, attempt);
                     await chSchedulerSleep(retryMs, '附件下载网络异常', `HTTP ${status} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
@@ -1985,9 +2044,10 @@ directory_writer = r'''
         return headers;
     }
 
-    async function chFetchRootHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT) {
+    async function chFetchRootHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT, options = {}) {
         const headers=await chRemoteHeaders(workspaceId); const entries=[];
         for(const archived of [false,true]){
+            options.onProgress?.({stage:'head-root',message:`快速核对${archived?'已归档':'未归档'}列表…`});
             const r=await fetch(`/backend-api/conversations?offset=0&limit=${limit}&order=updated${archived?'&is_archived=true':''}`,{headers});
             if(!r.ok)throw new Error(`远端列表快速刷新失败 (${r.status})`);
             const j=await r.json();
@@ -1996,65 +2056,119 @@ directory_writer = r'''
         return entries;
     }
 
-    async function chFetchProjectHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT) {
+    async function chFetchProjectHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT, options = {}) {
         const resolved=resolveWorkspaceId(workspaceId); if(!resolved)return [];
+        options.onProgress?.({stage:'head-project',message:'快速核对项目列表…'});
         const projects=await getProjectSpaces(resolved,{conversationsPerGizmo:limit,ownedOnly:true}); const entries=[];
         for(const project of projects)for(const item of project.conversations||[])entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:item.is_archived??false,projectId:project.id,projectTitle:project.title,__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chProjectState:'known',__chSourceKey:`project:${project.id}`});
         return entries;
     }
 
-    async function chFetchRemoteHeadSnapshot(workspaceId = null) {
-        const entries=[...(await chFetchRootHead(workspaceId)),...(await chFetchProjectHead(workspaceId))];
+    async function chFetchRemoteHeadSnapshot(workspaceId = null, options = {}) {
+        const entries=[...(await chFetchRootHead(workspaceId,CH_REMOTE_HEAD_LIMIT,options)),...(await chFetchProjectHead(workspaceId,CH_REMOTE_HEAD_LIMIT,options))];
         return {entries,fingerprint:chHeadFingerprint(entries),validatedAt:Date.now()};
     }
 
-    async function chFetchRootFull(workspaceId = null) {
+    async function chFetchRootFull(workspaceId = null, options = {}) {
         const headers=await chRemoteHeaders(workspaceId); const entries=[];
         for(const archived of [false,true]){
-            let offset=0,hasMore=true;
+            let offset=0,hasMore=true,page=0;
             while(hasMore){
+                page+=1;
+                options.onProgress?.({stage:'root',archived,page,message:`读取${archived?'已归档':'未归档'}对话 · 第 ${page} 页…`});
                 const r=await fetch(`/backend-api/conversations?offset=${offset}&limit=${PAGE_LIMIT}&order=updated${archived?'&is_archived=true':''}`,{headers});
                 if(!r.ok)throw new Error(`远端列表完整刷新失败 (${r.status})`);
                 const j=await r.json(); const items=Array.isArray(j.items)?j.items:[];
                 for(const item of items)entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:archived,projectId:null,projectTitle:null,__chArchiveState:'known',__chProjectState:'unknown',__chSourceKey:`root:${archived?'archived':'active'}`});
                 hasMore=items.length===PAGE_LIMIT; offset+=items.length;
-                if(hasMore)await sleep(jitter());
+                options.onPartial?.({list:chMergeRemoteEntries(entries),complete:false,note:`root ${entries.length} · project complement pending`,validatedAt:0,refreshMode:'partial-root'});
             }
         }
         return chMergeRemoteEntries(entries);
     }
 
-    async function chFetchFullRemoteUniverse(workspaceId = null) {
-        const rootList=await chFetchRootFull(workspaceId);
+    async function chFetchProjectFull(workspaceId = null, options = {}) {
+        const resolved=resolveWorkspaceId(workspaceId); if(!resolved)return [];
+        const headers=await chRemoteHeaders(resolved);
+        options.onProgress?.({stage:'projects',message:'读取项目列表…'});
+        const projects=await getProjectSpaces(resolved,{conversationsPerGizmo:PROJECT_SIDEBAR_PREVIEW,ownedOnly:true});
+        const entries=[];
+        for(let projectIndex=0;projectIndex<projects.length;projectIndex++){
+            const project=projects[projectIndex];
+            let cursor='0'; let fetched=false;
+            options.onProgress?.({stage:'projects',current:projectIndex+1,total:projects.length,message:`读取项目 ${projectIndex+1}/${projects.length} · ${project.title}`});
+            do{
+                const r=await fetch(`/backend-api/gizmos/${project.id}/conversations?cursor=${cursor}`,{headers});
+                if(!r.ok){
+                    if(!fetched&&Array.isArray(project.conversations)&&project.conversations.length){
+                        project.conversations.forEach(item=>entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:item.is_archived??false,projectId:project.id,projectTitle:project.title,__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chProjectState:'known',__chSourceKey:`project:${project.id}`}));
+                        cursor=null; break;
+                    }
+                    throw new Error(`列举项目对话列表失败 (${r.status})`);
+                }
+                const j=await r.json();
+                for(const item of j.items||[])entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:item.is_archived??false,projectId:project.id,projectTitle:project.title,__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chProjectState:'known',__chSourceKey:`project:${project.id}`});
+                cursor=j.cursor||null; fetched=true;
+            }while(cursor);
+            options.onProjectPartial?.(entries.slice(),{current:projectIndex+1,total:projects.length,project});
+        }
+        return chMergeRemoteEntries(entries);
+    }
+
+    async function chFetchFullRemoteUniverse(workspaceId = null, options = {}) {
+        const rootList=await chFetchRootFull(workspaceId,{
+            onProgress:options.onProgress,
+            onPartial:partial=>options.onPartial?.(partial)
+        });
+        options.onPartial?.({list:rootList,complete:false,note:`root complete ${rootList.length} · project complement pending`,validatedAt:0,refreshMode:'partial-root-complete'});
         let projectList=[]; let complete=true; let note=null;
         try{
-            projectList=(await listProjectSpaceConversations(workspaceId)).map(item=>({...item,__chProjectState:'known',__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chSourceKey:`project:${item.projectId||'unknown'}`}));
+            projectList=await chFetchProjectFull(workspaceId,{
+                onProgress:options.onProgress,
+                onProjectPartial:(partialProjects,meta)=>{
+                    const merged=chMergeRemoteEntries(rootList.concat(partialProjects)).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':'unknown',__chArchiveState:item.__chArchiveState||'unknown'}));
+                    options.onPartial?.({list:merged,complete:false,note:`root ${rootList.length} · projects ${meta.current}/${meta.total}`,validatedAt:0,refreshMode:'partial-projects'});
+                }
+            });
         }catch(err){complete=false;note=`project complement failed: ${err?.message||String(err)}`;}
         const merged=chMergeRemoteEntries(rootList.concat(projectList)).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':complete?'none':'unknown',__chArchiveState:item.__chArchiveState||'unknown'}));
         return {list:merged,complete,note:note||`full remote index ${merged.length}`};
     }
 
-    async function chRefreshRemoteIndex(workspaceId = null, { forceFull = false } = {}) {
+    async function chRefreshRemoteIndex(workspaceId = null, { forceFull = false, onProgress = null, onPartial = null } = {}) {
         const flightKey=chRemoteCacheIdentity(workspaceId)||`volatile:${workspaceId||'default'}`;
         if(chRemoteRefreshFlights.has(flightKey))return chRemoteRefreshFlights.get(flightKey);
+        const callbacks={onProgress,onPartial};
         const promise=(async()=>{
             const cached=await chRemoteCacheGet(workspaceId); const now=Date.now();
             const needsPeriodicFull=!cached||cached.schema!==CH_REMOTE_CACHE_SCHEMA||cached.provider!==CH_PROVIDER||cached.complete!==true||!cached.fullFetchedAt||(now-cached.fullFetchedAt)>=CH_REMOTE_FULL_REFRESH_MS;
             if(forceFull||needsPeriodicFull){
-                const full=await chFetchFullRemoteUniverse(workspaceId); const head=await chFetchRemoteHeadSnapshot(workspaceId);
-                const snapshot={list:full.list,complete:full.complete,note:full.note,fullFetchedAt:now,validatedAt:head.validatedAt,headFingerprint:head.fingerprint};
-                if(full.complete)await chRemoteCachePut(workspaceId,snapshot);
-                return {...snapshot,refreshMode:'full'};
+                callbacks.onProgress?.({stage:'full',message:'完整刷新远端索引…'});
+                const progressiveCallbacks={...callbacks,onPartial:partial=>{
+                    callbacks.onPartial?.(partial);
+                    if(!cached?.complete && partial?.list?.length){
+                        void chRemoteCachePut(workspaceId,{...partial,complete:false,fullFetchedAt:Number(cached?.fullFetchedAt||0),validatedAt:Number(cached?.validatedAt||0),headFingerprint:cached?.headFingerprint||null,note:partial.note||'progressive incomplete remote index'});
+                    }
+                }};
+                const full=await chFetchFullRemoteUniverse(workspaceId,progressiveCallbacks);
+                let head={validatedAt:Date.now(),fingerprint:null};
+                try{head=await chFetchRemoteHeadSnapshot(workspaceId,callbacks);}catch(err){console.warn('[ChatHarbor] head fingerprint refresh failed after full snapshot',err);}
+                const snapshot={list:full.list,complete:full.complete,note:full.note,fullFetchedAt:now,validatedAt:head.validatedAt||Date.now(),headFingerprint:head.fingerprint||null};
+                // Incomplete snapshots are still useful UI/discovery cache, but never prove LOCAL_ONLY.
+                await chRemoteCachePut(workspaceId,snapshot);
+                return {...snapshot,refreshMode:full.complete?'full':'full-incomplete'};
             }
-            const head=await chFetchRemoteHeadSnapshot(workspaceId);
+            callbacks.onProgress?.({stage:'fast',message:`快速核对最新 ${CH_REMOTE_HEAD_LIMIT} 条…`});
+            const head=await chFetchRemoteHeadSnapshot(workspaceId,callbacks);
             if(head.fingerprint===cached.headFingerprint){
                 const snapshot={...cached,validatedAt:head.validatedAt,note:`fast refresh stable · head ${CH_REMOTE_HEAD_LIMIT}`};
                 await chRemoteCachePut(workspaceId,snapshot); return {...snapshot,refreshMode:'fast-stable'};
             }
-            const full=await chFetchFullRemoteUniverse(workspaceId); const refreshedHead=await chFetchRemoteHeadSnapshot(workspaceId);
+            callbacks.onProgress?.({stage:'full-after-change',message:'发现远端索引变化，转完整刷新…'});
+            const full=await chFetchFullRemoteUniverse(workspaceId,callbacks); const refreshedHead=await chFetchRemoteHeadSnapshot(workspaceId,callbacks);
             const snapshot={list:full.list,complete:full.complete,note:full.note,fullFetchedAt:Date.now(),validatedAt:refreshedHead.validatedAt,headFingerprint:refreshedHead.fingerprint};
-            if(full.complete)await chRemoteCachePut(workspaceId,snapshot);
-            return {...snapshot,refreshMode:'full-after-change'};
+            await chRemoteCachePut(workspaceId,snapshot);
+            return {...snapshot,refreshMode:full.complete?'full-after-change':'full-after-change-incomplete'};
         })().finally(()=>chRemoteRefreshFlights.delete(flightKey));
         chRemoteRefreshFlights.set(flightKey,promise); return promise;
     }
@@ -3253,7 +3367,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.12.0 Network/State Convergence Release ========================
+# ======================== ChatHarbor 0.0.13.0 Network/State Convergence Release ========================
 # This release closes cross-cutting runtime gaps across network scheduling, remote refresh
 # snapshot freezing, physical attachment integrity, commit-accurate status and presentation.
 
@@ -3349,7 +3463,8 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             remoteUniverse: [], remoteUniverseComplete: false, remoteUniverseNote: null,
             accountUniverse: null, accountUniverseComplete: false, accountUniverseNote: null,
             accountLoadedAt: null, teamUniverseCache: new Map(), remoteCacheMeta: null,
-            remoteRefreshPromise: null, pendingRemoteSnapshot: null, remoteRefreshGeneration: 0, remoteAppliedValidatedAt: 0
+            remoteRefreshPromise: null, pendingRemoteSnapshot: null, remoteRefreshGeneration: 0, remoteAppliedValidatedAt: 0,
+            loadingMessage: chT('正在加载远端索引…','Loading remote index…')
         };
 
         const statusLabel = value => ({
@@ -3431,6 +3546,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                         <details style="padding:9px 10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
                             <summary id="ch-network-policy-summary" style="cursor:pointer; font-size:13px; font-weight:600;">${chT('网络策略','Network policy')} · ${chNetworkPolicySummary(state.networkPolicy)}</summary>
                             <div id="ch-network-policy-lock-note" style="display:none;margin-top:7px;font-size:11px;color:#6b7280;">${chT('本次同步期间不可修改','Locked during this sync')}</div>
+                            <div style="margin-top:6px;font-size:10.5px;color:#9ca3af;line-height:1.45;">${chT('该速度用于对话详情；远端列表与附件元数据使用独立轻量节奏，三者共享 429 全局冷却。','This speed applies to conversation detail. Discovery and attachment metadata use lighter lanes; all lanes share the global 429 cooldown.')}</div>
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px;">
                                 <label style="font-size:11px;color:#6b7280;grid-column:1/-1;">${chT('速度','Speed')}<select id="ch-speed-level" style="width:100%;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;">${CH_SPEED_LEVELS.map((x,i)=>`<option value="${i}" ${i===state.networkPolicy.speedIndex?'selected':''}>${x.name}</option>`).join('')}</select></label>
                                 <label style="font-size:11px;color:#6b7280;">${chT('每批','Batch')}<input id="ch-batch-size" type="number" min="1" max="200" value="${state.networkPolicy.batchSize}" style="width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;"></label>
@@ -3643,14 +3759,14 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             const listEl=$('conv-list'), statusEl=$('conv-status');
             listEl.innerHTML='';
             updateControls(); updateArchiveSummary();
-            if(state.loading){statusEl.textContent=chT('正在加载列表…','Loading…');if(selectAllCheckbox){selectAllCheckbox.checked=false;selectAllCheckbox.indeterminate=false;}return;}
+            if(state.loading && !state.list.length){statusEl.textContent=state.loadingMessage||chT('正在加载远端索引…','Loading remote index…');if(selectAllCheckbox){selectAllCheckbox.checked=false;selectAllCheckbox.indeterminate=false;}return;}
             const matchedSelected = state.filtered.reduce((n,item)=>n+(state.selected.has(item.id)?1:0),0);
             if(selectAllCheckbox){selectAllCheckbox.checked=state.filtered.length>0&&matchedSelected===state.filtered.length;selectAllCheckbox.indeterminate=matchedSelected>0&&matchedSelected<state.filtered.length;}
             const providerTotal = state.remoteUniverse.length || state.list.length;
             const countParts=[`${chT('已选','Selected')} ${state.selected.size}`];
             if(state.filtered.length!==providerTotal) countParts.push(`${chT('当前','Current')} ${state.filtered.length} / ${chT('共','Total')} ${providerTotal}`);
             else countParts.push(`${chT('共','Total')} ${providerTotal}`);
-            statusEl.textContent=countParts.join(' · ');
+            statusEl.textContent=state.loading ? `${state.loadingMessage||chT('远端索引加载中','Remote index loading')} · ${countParts.join(' · ')}` : countParts.join(' · ');
             if(!state.filtered.length){const e=document.createElement('div');e.textContent=chT('没有匹配的对话。','No matching conversations.');e.style.cssText='color:#9ca3af;padding:12px 8px;';listEl.appendChild(e);return;}
             state.filtered.slice(0,state.visibleCount).forEach((item,index)=>{
                 const row=document.createElement('label');
@@ -3715,37 +3831,62 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             if(state.mode!=='team')return;
             if(!state.workspaceId){const ids=detectAllWorkspaceIds();if(ids.length===0)throw new Error(chT('未检测到 Team Workspace ID，请先打开一个团队对话后再试。','No Team Workspace ID detected. Open a team conversation first.'));state.workspaceId=ids[0];}
         };
+        const remoteProgressText = info => {
+            if(!info)return chT('正在加载远端索引…','Loading remote index…');
+            if(info.message)return info.message;
+            return chT('正在加载远端索引…','Loading remote index…');
+        };
         const startRemoteRefresh = async (ws, options={}) => {
             if(state.remoteRefreshPromise)return state.remoteRefreshPromise;
             const generation=++state.remoteRefreshGeneration;
+            const userProgress=options.onProgress;
+            const userPartial=options.onPartial;
             const task=(async()=>{
-                const snapshot=await chRefreshRemoteIndex(ws,options);
+                const snapshot=await chRefreshRemoteIndex(ws,{
+                    ...options,
+                    onProgress:info=>{
+                        state.loadingMessage=remoteProgressText(info);
+                        try{userProgress?.(info);}catch(_){}
+                        if(state.loading)renderList();
+                    },
+                    onPartial:partial=>{
+                        try{userPartial?.(partial);}catch(_){}
+                        if(generation!==state.remoteRefreshGeneration||chSyncRun.active)return;
+                        if(partial?.list?.length){applyRemoteSnapshot(partial);renderAll();}
+                    }
+                });
                 if(generation!==state.remoteRefreshGeneration)return snapshot;
                 return snapshot;
             })();
             state.remoteRefreshPromise=task;
             try{return await task;}finally{if(state.remoteRefreshPromise===task)state.remoteRefreshPromise=null;}
         };
+        chSetNetworkStatusHook(info=>{
+            if(chSyncRun.active||!state.loading||!info)return;
+            const remaining=Number(info.remainingMs||0);
+            const suffix=info.countdown&&remaining>0?` · ${chFormatRemainingDuration(remaining)}`:'';
+            state.loadingMessage=`${info.primary||chT('网络等待','Network wait')}${suffix}${info.secondary?` · ${info.secondary}`:''}`;
+            renderList();
+        });
         const loadRemoteList = async (force=false, forceFull=false) => {
-            state.loading=true;state.syncStatusById.clear();state.lastPlan=null;renderList();
+            state.loading=true;state.loadingMessage=chT('正在加载远端索引…','Loading remote index…');state.syncStatusById.clear();state.lastPlan=null;renderList();
             try{
                 ensureTeamWorkspace(); const ws=currentWorkspaceForRemote();
                 if(!force){
                     const cached=await chRemoteCacheGet(ws);
-                    if(cached?.complete&&Array.isArray(cached.list)&&cached.list.length){
-                        applyRemoteSnapshot({...cached,refreshMode:'persistent-cache'}); state.loading=false; renderAll(); if(state.rootHandle)await runPreflight(true);
-                        // Background validation is single-flight.  It may finish while the user starts sync;
-                        // in that case ensureRemoteFreshForSync awaits it before the run snapshot is frozen.
+                    // Complete or incomplete cache is useful for immediate display. Incomplete
+                    // cache never proves LOCAL_ONLY and is always refreshed in the background.
+                    if(cached&&Array.isArray(cached.list)&&cached.list.length){
+                        applyRemoteSnapshot({...cached,refreshMode:cached.complete?'persistent-cache':'persistent-cache-incomplete'}); state.loading=false; renderAll(); if(state.rootHandle)await runPreflight(true);
                         void (async()=>{try{const fresh=await startRemoteRefresh(ws);await applyRemoteSnapshotSafely(fresh);}catch(err){console.warn('[ChatHarbor] background remote refresh failed',err);}})();
                         return;
                     }
                 }
-                const snapshot=await startRemoteRefresh(ws,{forceFull:Boolean(forceFull)}); applyRemoteSnapshot(snapshot); state.loading=false; renderAll(); if(state.rootHandle)await runPreflight(true);
-            }catch(err){state.loading=false;if(!state.remoteUniverse.length){state.list=[];state.filtered=[];state.remoteUniverse=[];}$('conv-status').textContent=`${chT('加载失败','Load failed')}: ${err.message}`;renderList();}
+                const snapshot=await startRemoteRefresh(ws,{forceFull:Boolean(forceFull)}); applyRemoteSnapshot(snapshot); state.loading=false;state.loadingMessage=''; renderAll(); if(state.rootHandle)await runPreflight(true);
+            }catch(err){state.loading=false;state.loadingMessage='';if(!state.remoteUniverse.length){state.list=[];state.filtered=[];state.remoteUniverse=[];}$('conv-status').textContent=`${chT('加载失败','Load failed')}: ${err.message}`;renderList();}
         };
         const ensureRemoteFreshForSync = async () => {
             ensureTeamWorkspace(); const ws=currentWorkspaceForRemote();
-            // A background refresh started from cached UI must complete before we freeze this run.
             if(state.remoteRefreshPromise){
                 chSetProgress(chT('刷新远端索引','Refreshing remote index'),chT('等待正在进行的远端快速刷新完成…','Waiting for the active remote refresh…'),0);
                 const snapshot=await state.remoteRefreshPromise;if(Number(snapshot?.validatedAt||0)>Number(state.remoteAppliedValidatedAt||0)){applyRemoteSnapshot(snapshot);renderAll();if(state.rootHandle)await runPreflight(true);}
@@ -3755,6 +3896,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             chSetProgress(chT('刷新远端索引','Refreshing remote index'),chT('同步前确认最新列表；无变化时只检查最新窗口。','Confirming the latest remote index; stable heads stop early.'),0);
             const keep=new Set(state.selected); const snapshot=await startRemoteRefresh(ws); applyRemoteSnapshot(snapshot);
             state.selected.clear(); for(const id of keep)if(state.remoteUniverse.some(item=>item.id===id))state.selected.add(id); renderAll(); if(state.rootHandle)await runPreflight(true);
+            if(!state.remoteUniverseComplete)throw new Error(chT('远端索引不完整，已保留可用缓存，但为避免漏同步，本轮不开始写入。请稍后刷新重试。','Remote index is incomplete. Available cache is retained, but sync will not write until a complete remote snapshot is available.'));
         };
         const runPreflight = async (automatic=false) => {
             if(!state.rootHandle)return;
@@ -4018,6 +4160,10 @@ required_runtime_markers = [
     "async function chBackendFetch",
     "async function chDataTransferFetch",
     "const chBackendScheduler",
+    "CH_BACKEND_LANE_DISCOVERY",
+    "CH_BACKEND_LANE_ATTACHMENT",
+    "chSetNetworkStatusHook",
+    "partial-root",
     "remoteRefreshPromise",
     "pendingRemoteSnapshot",
     "assetFastChecked",

@@ -1,4 +1,4 @@
-## 0.0.12.0 — 2026-09-15
+## 0.0.13.0 — 2026-09-15
 
 ### Runtime convergence
 - Added one serialized backend request scheduler for ChatHarbor remote lists, project enumeration, conversation detail and attachment-metadata requests.
@@ -235,3 +235,12 @@ Before the integrated series, the clean-lineage reconstruction validated:
 - `conversation_id` Manifest identity;
 - attachment preservation when attachment downloading is later disabled;
 - non-blocking completion progress.
+
+## 0.0.13.0 — Lane-aware Discovery Recovery
+
+- Fixed 0.0.12.0 startup regression where list/project discovery inherited the full conservative conversation-detail delay.
+- Split backend scheduling into discovery, detail and attachment-metadata lanes while retaining one global HTTP 429 cooldown.
+- Added progressive root/project remote-index display and progress reporting.
+- Added recoverable incomplete Remote Index cache; incomplete snapshots never prove LOCAL_ONLY and cannot start write sync.
+- Exposed non-sync request/cooldown waits in loading status.
+- Preserved 0.0.12.0 commit accuracy, physical asset validation, attachment rollback and active-run snapshot freeze.
