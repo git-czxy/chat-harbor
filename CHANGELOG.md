@@ -1,5 +1,22 @@
 # ChatHarbor Changelog
 
+## 0.0.10.1 — 2026-09-14
+
+### Changed
+- Header now keeps only the current provider context (`ChatGPT`); conversation scope remains in the scope filter and local directory context remains in the Local archive card.
+- Local archive card now labels the selected root explicitly as `目录：<name>` and renames `详细信息` to `归档详情`.
+- Selection statistics move to a fixed position immediately after `全选` instead of jumping between left/right edges. They show `已选 N · 共 T`, or `已选 N · 当前 M / 共 T` when the visible/filter scope is narrower than the provider universe.
+- `同步内容` now mirrors the effective attachment policy in its collapsed summary: `下载附件` / `不下载附件`.
+
+### Run-state consistency
+- Network policy and attachment policy are snapshotted at sync start and remain the authoritative settings for that run.
+- During an active sync, network controls and attachment controls are disabled; expanding either card shows `本次同步期间不可修改`.
+- Search, scope/filter controls and per-conversation selection are also locked during the active run, preventing the visible configuration from drifting away from the executing task.
+- Pause / resume / safe cancel remain available. Settings are editable again after completion or cancellation.
+
+### Preserved
+- Archive Layout v2, local-only v1→v2 migration, version-aware Planner, streaming per-conversation commit, Manifest authority, conservative network timing, MM:SS batch countdown and tracked-only cleanup are unchanged.
+
 ## 0.0.10.0 — 2026-09-14
 
 ### Added

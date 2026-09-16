@@ -1,7 +1,7 @@
 {
   "product": "ChatHarbor",
-  "build": "Archive Layout v2 + Local Migration + Version-aware Selective Sync",
-  "status": "AUTOMATED_REGRESSION_PASS_REAL_LAYOUT_MIGRATION_SMOKE_REQUIRED",
+  "build": "Archive Layout v2 + UI State Clarity + Run-locked Settings + Version-aware Selective Sync",
+  "status": "AUTOMATED_REGRESSION_PASS_REAL_UI_SMOKE_REQUIRED",
   "date": "2026-09-14",
   "clean_upstream": {
     "repository": "huhusmang/ChatGPT-Exporter",
@@ -54,7 +54,13 @@
     "zh-CN / en-US ChatHarbor-owned UI and inline reports",
     "cached canonical account remote index with local all/project scope switching",
     "compact right rail with fixed primary sync action",
-    "aggregate To process status separating NEW from VERIFY semantics"
+    "aggregate To process status separating NEW from VERIFY semantics",
+    "provider-only header context (no duplicate scope/archive labels)",
+    "explicit archive directory label + Archive details wording",
+    "fixed-left Selected / Current / Total selection statistics",
+    "collapsed Sync content summary shows effective attachment policy",
+    "run-start snapshot freezes attachment + network policy for the active sync",
+    "active sync disables network/attachment/filter/search/selection mutation while pause/resume/cancel remain available"
   ],
   "explicitly_not_in_this_stage": [
     "full localization of every inherited upstream string outside ChatHarbor-owned UI",
@@ -70,7 +76,7 @@
     "archive_layout_version": 2,
     "layout_migration_remote_fetch": false
   },
-  "integrated_build_version": "0.0.10.0",
+  "integrated_build_version": "0.0.10.1",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,
@@ -88,7 +94,7 @@
     "height": "min(820px, calc(100vh - 48px))",
     "launcher": "44px green, right-edge default at 45% viewport height, half-hidden when idle, position persisted",
     "reporting": "preflight details folded into local archive card; sync completion inline; copyable detailed reports; no dedicated report modal",
-    "selection": "single explicit selected conversation-id set; tri-state select-all applies to full filtered result",
+    "selection": "single explicit selected conversation-id set; tri-state select-all applies to full filtered result; counts stay left at a fixed offset as Selected N · Current M / Total T when filtered",
     "primary_actions": [
       "sync selected"
     ],
@@ -96,7 +102,9 @@
     "directory_flow": "remote ready -> choose provider archive root -> detect layout; v1 offers explicit local-only upgrade; v2 auto read-only scan/Plan; manual Rescan local available",
     "legacy_space_chooser_primary_entry": false,
     "remote_scope_cache": "all/project scope reuses one canonical account index until explicit Refresh; Team is separate",
-    "archive_summary": "Local N (in projects P / outside projects R) + New / Verify / Synced / Issues; migration state shown separately"
+    "archive_summary": "Local N (in projects P / outside projects R) + New / Verify / Synced / Issues; migration state shown separately",
+    "header_context": "provider only; scope remains in filter controls and archive directory remains in Local archive card",
+    "run_settings": "network policy and sync-content settings remain visible but are immutable during an active sync; summaries reflect the run-start snapshot"
   },
   "core_literal_sha256": "1c6f0a1dda616b3b1aff6b7560292340bc539fd357bc491945dd7db204cb02ea"
 }

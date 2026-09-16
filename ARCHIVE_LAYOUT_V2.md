@@ -13,7 +13,7 @@ chats/
 └─ ...
 ```
 
-ChatHarbor 0.0.10.0 implements only the `chatgpt` adapter. The provider namespace is reserved now so future adapters do not need to redesign the local archive model.
+ChatHarbor 0.0.10.x currently implements only the `chatgpt` adapter. The provider namespace is reserved now so future adapters do not need to redesign the local archive model.
 
 Within one provider root, `conversation_id` remains the Manifest identity. Across providers, the effective global identity is `(provider, conversation_id)`.
 

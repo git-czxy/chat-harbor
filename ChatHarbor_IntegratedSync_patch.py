@@ -35,9 +35,9 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.10.0\n"
-    "// @description  Clean-lineage archive sync with Archive Layout v2, local migration, conservative pacing, and version-aware selective sync.\n"
-    "// @description:zh-CN 干净来源的本地档案同步：Archive Layout v2、本地迁移、保守节奏、版本识别与选择性同步。\n"
+    "// @version      0.0.10.1\n"
+    "// @description  Clean-lineage archive sync with Layout v2, explicit run-state locking, compact status summaries, and version-aware selective sync.\n"
+    "// @description:zh-CN 干净来源的本地档案同步：Layout v2、执行期策略锁定、紧凑状态摘要、版本识别与选择性同步。\n"
     "// @author       huhu; ChatHarbor contributors\n"
 )
 
@@ -3053,7 +3053,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.10.0 Archive Layout v2 + Migration ========================
+# ======================== ChatHarbor 0.0.10.1 UI State Clarity + Run Locking ========================
 # The sync/runtime core above remains unchanged. This final bounded patch replaces only the
 # picker presentation, report presentation, and launcher presentation.
 
@@ -3143,7 +3143,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             projectFilter: 'all', archived: 'all', syncStatus: 'all',
             timeField: 'update', timeRange: 'all', sort: 'desc', startDate: '', endDate: '',
             loading: true, pageSize: 100, visibleCount: 100, includeAttachments: initialAttachments,
-            networkPolicy: chLoadNetworkPolicy(), rootHandle: null, localScan: null, lastPlan: null,
+            networkPolicy: chLoadNetworkPolicy(), runSettings: null, rootHandle: null, localScan: null, lastPlan: null,
             layoutState: null, migrationActive: false, migrationReport: null,
             lastResult: null, syncStatusById: new Map(), lastSelectedIndex: null,
             remoteUniverse: [], remoteUniverseComplete: false, remoteUniverseNote: null,
@@ -3151,7 +3151,6 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             accountLoadedAt: null, teamUniverseCache: new Map()
         };
 
-        const modeLabel = value => value === 'team' ? chT('团队空间','Team workspace') : value === 'project' ? chT('项目对话','Project conversations') : chT('全部对话','All conversations');
         const statusLabel = value => ({
             NEW: chT('新增','New'), VERIFY: chT('待核验','Verify'), UPDATED: chT('内容更新','Updated'),
             RENAMED_ONLY: chT('仅改名','Renamed'), UPDATED_AND_RENAMED: chT('更新+改名','Updated + renamed'),
@@ -3213,16 +3212,16 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             </div>
             <div style="display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:12px; padding:12px 14px 14px; flex:1 1 auto; min-height:0; background:#f8fafc;">
                 <section style="min-width:0; min-height:0; display:flex; flex-direction:column;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; flex:0 0 auto;">
-                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#374151;cursor:pointer;white-space:nowrap;"><input id="select-all-checkbox" type="checkbox"><span>${chT('全选','Select all')}</span></label>
-                        <div id="conv-status" style="font-size:12px; color:#6b7280; text-align:right;">${chT('正在加载列表…','Loading…')}</div>
+                    <div style="display:flex; justify-content:flex-start; align-items:center; gap:0; margin-bottom:8px; flex:0 0 auto; min-height:22px;">
+                        <label style="display:flex;align-items:center;gap:6px;min-width:72px;font-size:12px;color:#374151;cursor:pointer;white-space:nowrap;"><input id="select-all-checkbox" type="checkbox"><span>${chT('全选','Select all')}</span></label>
+                        <div id="conv-status" style="margin-left:24px;font-size:12px;color:#6b7280;white-space:nowrap;">${chT('正在加载列表…','Loading…')}</div>
                     </div>
                     <div id="conv-list" style="flex:1 1 auto; min-height:0; overflow:auto; border:1px solid #e5e7eb; border-radius:9px; padding:8px; background:#fff;"></div>
                 </section>
                 <aside style="min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:9px;">
                     <div id="ch-right-scroll" style="min-height:0; flex:1 1 auto; overflow:auto; display:flex; flex-direction:column; gap:9px; padding-right:1px;">
                         <div style="padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
-                            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong style="font-size:13px;">${chT('本地归档','Local archive')}</strong><button id="ch-archive-copy-report-btn" style="display:none;padding:3px 7px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#6b7280;cursor:pointer;font-size:11px;">${chT('详细信息','Details')}</button></div>
+                            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong style="font-size:13px;">${chT('本地归档','Local archive')}</strong><button id="ch-archive-copy-report-btn" style="display:none;padding:3px 7px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#6b7280;cursor:pointer;font-size:11px;">${chT('归档详情','Archive details')}</button></div>
                             <div id="ch-archive-path" style="margin-top:6px; font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${chT('尚未选择目录','No directory selected')}</div>
                             <div id="ch-archive-summary" style="margin-top:6px; font-size:12px; line-height:1.55; color:#4b5563;">${chT('等待选择目录','Waiting for directory')}</div>
                             <div style="display:flex; gap:6px; margin-top:8px;"><button id="ch-choose-directory-btn" style="flex:1; padding:7px 8px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer;">${chT('选择目录','Choose')}</button><button id="preflight-plan-btn" style="flex:1; padding:7px 8px; border:1px solid #6366f1; border-radius:6px; background:#fff; color:#4338ca; cursor:pointer; font-weight:600;">${chT('重新扫描本地','Rescan local')}</button></div>
@@ -3230,6 +3229,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                         </div>
                         <details style="padding:9px 10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
                             <summary id="ch-network-policy-summary" style="cursor:pointer; font-size:13px; font-weight:600;">${chT('网络策略','Network policy')} · ${chNetworkPolicySummary(state.networkPolicy)}</summary>
+                            <div id="ch-network-policy-lock-note" style="display:none;margin-top:7px;font-size:11px;color:#6b7280;">${chT('本次同步期间不可修改','Locked during this sync')}</div>
                             <div style="display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px;">
                                 <label style="font-size:11px;color:#6b7280;grid-column:1/-1;">${chT('速度','Speed')}<select id="ch-speed-level" style="width:100%;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;">${CH_SPEED_LEVELS.map((x,i)=>`<option value="${i}" ${i===state.networkPolicy.speedIndex?'selected':''}>${x.name}</option>`).join('')}</select></label>
                                 <label style="font-size:11px;color:#6b7280;">${chT('每批','Batch')}<input id="ch-batch-size" type="number" min="1" max="200" value="${state.networkPolicy.batchSize}" style="width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;"></label>
@@ -3239,7 +3239,8 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                             </div>
                         </details>
                         <details style="padding:9px 10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
-                            <summary style="cursor:pointer; font-size:13px; font-weight:600;">${chT('同步内容','Sync content')}</summary>
+                            <summary id="ch-sync-content-summary" style="cursor:pointer; font-size:13px; font-weight:600;">${chT('同步内容','Sync content')} · ${state.includeAttachments?chT('下载附件','Download attachments'):chT('不下载附件','Do not download attachments')}</summary>
+                            <div id="ch-sync-content-lock-note" style="display:none;margin-top:7px;font-size:11px;color:#6b7280;">${chT('本次同步期间不可修改','Locked during this sync')}</div>
                             <label style="display:flex; gap:7px; align-items:flex-start; margin-top:8px; font-size:12px; cursor:pointer;"><input id="include-attachments-picker" type="checkbox" ${state.includeAttachments?'checked':''}><span>${chT('同时下载上传和生成的附件','Download uploads and generated files')}<small style="display:block;color:#6b7280;margin-top:2px;">${chT('默认关闭；开启后处理时间与本地占用可能明显增加。','Off by default; increases processing time and local storage.')}</small></span></label>
                         </details>
                         <div id="ch-sync-progress" style="display:none; padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
@@ -3289,14 +3290,16 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         const pauseMinInput = $('ch-pause-min');
         const pauseMaxInput = $('ch-pause-max');
         const networkSummary = $('ch-network-policy-summary');
+        const networkLockNote = $('ch-network-policy-lock-note');
+        const syncContentSummary = $('ch-sync-content-summary');
+        const syncContentLockNote = $('ch-sync-content-lock-note');
         const archiveCopyReportBtn = $('ch-archive-copy-report-btn');
 
         spaceSelect.value = state.mode;
         archivedSelect.value = state.archived;
 
         const updateHeader = () => {
-            const root = state.rootHandle?.name ? ` · ${state.rootHandle.name}` : '';
-            $('ch-header-summary').textContent = `${modeLabel(state.mode)} · ChatGPT${root}`;
+            $('ch-header-summary').textContent = CH_PROVIDER_LABEL;
         };
         const updateTimeSummary = () => {
             const range = state.timeRange === '7d' ? chT('最近7天','7 days') : state.timeRange === '30d' ? chT('最近30天','30 days') : state.timeRange === 'custom' ? chT('自定义','Custom') : chT('不限','All');
@@ -3372,7 +3375,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             state.visibleCount = state.pageSize;
         };
         const updateArchiveSummary = () => {
-            $('ch-archive-path').textContent = state.rootHandle?.name || chT('尚未选择目录','No directory selected');
+            $('ch-archive-path').textContent = state.rootHandle?.name ? `${chT('目录','Directory')}：${state.rootHandle.name}` : chT('尚未选择目录','No directory selected');
             const layout = state.layoutState;
             if (!state.rootHandle) {
                 $('ch-archive-summary').textContent = chT('选择目录后将自动执行只读扫描','A read-only scan runs automatically after choosing a directory');
@@ -3406,10 +3409,22 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             if (archiveCopyReportBtn) archiveCopyReportBtn.style.display = state.lastPlan ? '' : 'none';
             updateHeader();
         };
+        const updateSettingsSummary = () => {
+            const runLocked = Boolean(chSyncRun.active && state.runSettings);
+            const policy = runLocked ? chSyncRun.policy : state.networkPolicy;
+            const includeAttachments = runLocked ? Boolean(state.runSettings.includeAttachments) : Boolean(state.includeAttachments);
+            if (networkSummary) networkSummary.textContent = `${chT('网络策略','Network policy')} · ${chNetworkPolicySummary(policy)}`;
+            if (syncContentSummary) syncContentSummary.textContent = `${chT('同步内容','Sync content')} · ${includeAttachments ? chT('下载附件','Download attachments') : chT('不下载附件','Do not download attachments')}`;
+            if (networkLockNote) networkLockNote.style.display = runLocked ? '' : 'none';
+            if (syncContentLockNote) syncContentLockNote.style.display = runLocked ? '' : 'none';
+        };
         const updateControls = () => {
             const disabled = state.loading || chSyncRun.active || state.migrationActive;
             const migrationRequired = Boolean(state.layoutState?.requiresMigration);
-            [spaceSelect,projectSelect,archivedSelect,syncStatusSelect,timeFieldSelect,timeRangeSelect,sortSelect,startDateInput,endDateInput,refreshBtn].forEach(el=>{if(el)el.disabled=disabled;});
+            [searchInput,spaceSelect,projectSelect,archivedSelect,syncStatusSelect,timeFieldSelect,timeRangeSelect,sortSelect,startDateInput,endDateInput,refreshBtn].forEach(el=>{if(el)el.disabled=disabled;});
+            const runLocked = Boolean(chSyncRun.active);
+            [speedLevelInput,batchSizeInput,pauseMinInput,pauseMaxInput,includeAttachmentsInput].forEach(el=>{if(el)el.disabled=runLocked;});
+            updateSettingsSummary();
             chooseDirBtn.disabled = disabled;
             chooseDirBtn.textContent = state.loading ? chT('等待远端列表…','Waiting for remote…') : state.rootHandle ? chT('更换目录','Change directory') : chT('选择目录','Choose directory');
             chooseDirBtn.title = state.loading ? chT('为避免远端/本地状态交叉，远端列表加载完成后再选择目录。','Directory selection is enabled after remote loading to avoid mixed generations.') : '';
@@ -3428,18 +3443,17 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             updateControls(); updateArchiveSummary();
             if(state.loading){statusEl.textContent=chT('正在加载列表…','Loading…');if(selectAllCheckbox){selectAllCheckbox.checked=false;selectAllCheckbox.indeterminate=false;}return;}
             const matchedSelected = state.filtered.reduce((n,item)=>n+(state.selected.has(item.id)?1:0),0);
-            const hiddenSelected = Math.max(0,state.selected.size-matchedSelected);
             if(selectAllCheckbox){selectAllCheckbox.checked=state.filtered.length>0&&matchedSelected===state.filtered.length;selectAllCheckbox.indeterminate=matchedSelected>0&&matchedSelected<state.filtered.length;}
+            const providerTotal = state.remoteUniverse.length || state.list.length;
             const countParts=[`${chT('已选','Selected')} ${state.selected.size}`];
-            if(hiddenSelected>0)countParts.push(`${chT('当前匹配中','in current matches')} ${matchedSelected}`);
-            if(state.filtered.length===state.list.length)countParts.push(`${chT('共','Total')} ${state.list.length}`);
-            else countParts.push(`${chT('匹配','Matched')} ${state.filtered.length} / ${chT('共','Total')} ${state.list.length}`);
+            if(state.filtered.length!==providerTotal) countParts.push(`${chT('当前','Current')} ${state.filtered.length} / ${chT('共','Total')} ${providerTotal}`);
+            else countParts.push(`${chT('共','Total')} ${providerTotal}`);
             statusEl.textContent=countParts.join(' · ');
             if(!state.filtered.length){const e=document.createElement('div');e.textContent=chT('没有匹配的对话。','No matching conversations.');e.style.cssText='color:#9ca3af;padding:12px 8px;';listEl.appendChild(e);return;}
             state.filtered.slice(0,state.visibleCount).forEach((item,index)=>{
                 const row=document.createElement('label');
                 row.style.cssText='display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 9px;border:1px solid #e5e7eb;border-radius:7px;margin-bottom:6px;cursor:pointer;background:#fff;';
-                const cb=document.createElement('input');cb.type='checkbox';cb.checked=state.selected.has(item.id);
+                const cb=document.createElement('input');cb.type='checkbox';cb.checked=state.selected.has(item.id);cb.disabled=state.loading||chSyncRun.active||state.migrationActive||Boolean(state.layoutState?.requiresMigration);
                 cb.onclick=e=>{const checked=cb.checked;if(e.shiftKey && state.lastSelectedIndex!=null){const a=Math.min(state.lastSelectedIndex,index),b=Math.max(state.lastSelectedIndex,index);for(let i=a;i<=b;i++){const id=state.filtered[i]?.id;if(!id)continue;if(checked)state.selected.add(id);else state.selected.delete(id);}}else{if(checked)state.selected.add(item.id);else state.selected.delete(item.id);}state.lastSelectedIndex=index;renderList();};
                 const content=document.createElement('div');content.style.minWidth='0';
                 const title=document.createElement('div');title.textContent=item.title||'Untitled Conversation';title.style.cssText='font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
@@ -3455,9 +3469,10 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         const renderAll = () => { rebuildProjectOptions(); rebuildSyncOptions(); applyFilters(); updateTimeSummary(); renderList(); };
 
         const persistPolicy = () => {
+            if (chSyncRun.active) { updateSettingsSummary(); return; }
             state.networkPolicy=chSaveNetworkPolicy({...state.networkPolicy,speedIndex:Number(speedLevelInput.value),batchSize:Number(batchSizeInput.value),batchPauseMinSec:Number(pauseMinInput.value),batchPauseMaxSec:Number(pauseMaxInput.value)});
             batchSizeInput.value=String(state.networkPolicy.batchSize);pauseMinInput.value=String(state.networkPolicy.batchPauseMinSec);pauseMaxInput.value=String(state.networkPolicy.batchPauseMaxSec);
-            networkSummary.textContent=`${chT('网络策略','Network policy')} · ${chNetworkPolicySummary(state.networkPolicy)}`;
+            updateSettingsSummary();
         };
         const applyPreflightStatuses = plan => {
             state.syncStatusById.clear();
@@ -3575,11 +3590,13 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             const selectedIds=new Set(state.selected);
             if(selectedIds.size===0)return;
             try{
-                chBeginControlledRun(state.networkPolicy);renderList();chSetProgress(chT('目录同步','Directory sync'),`${chT('按选择范围开始流式核验与写入…','Starting streaming verify + commit…')} · ${chNetworkPolicySummary(chSyncRun.policy)}`,0);
+                chBeginControlledRun(state.networkPolicy);
+                state.runSettings={includeAttachments:Boolean(state.includeAttachments),networkPolicy:{...chSyncRun.policy}};
+                renderList();chSetProgress(chT('目录同步','Directory sync'),`${chT('按选择范围开始流式核验与写入…','Starting streaming verify + commit…')} · ${chNetworkPolicySummary(chSyncRun.policy)}`,0);
                 const remote=state.remoteUniverse.length?state.remoteUniverse:state.list;
-                const result=await chRunIntegratedDirectorySync({rootHandle:root,remoteList:remote,selectedIds,workspaceId:state.workspaceId,includeAttachments:state.includeAttachments,remoteUniverseComplete:state.remoteUniverseComplete,remoteUniverseNote:state.remoteUniverseNote,networkPolicy:state.networkPolicy,onItemClassified:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction);renderList();},onItemCommitted:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction);}});
+                const result=await chRunIntegratedDirectorySync({rootHandle:root,remoteList:remote,selectedIds,workspaceId:state.workspaceId,includeAttachments:state.runSettings.includeAttachments,remoteUniverseComplete:state.remoteUniverseComplete,remoteUniverseNote:state.remoteUniverseNote,networkPolicy:chSyncRun.policy,onItemClassified:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction);renderList();},onItemCommitted:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction);}});
                 applyFinalStatuses(result);renderAll();
-            }catch(err){if(chIsCancellation(err))chSetProgress(chT('目录同步已取消','Sync cancelled'),chT('已在安全边界停止；已提交会话保留。','Stopped at a safe boundary; committed conversations were kept.'),100);else{console.error('[ChatHarbor] sync failed',err);chSetProgress(chT('目录同步失败','Sync failed'),err?.message||String(err),100);}}finally{chEndControlledRun();renderList();}
+            }catch(err){if(chIsCancellation(err))chSetProgress(chT('目录同步已取消','Sync cancelled'),chT('已在安全边界停止；已提交会话保留。','Stopped at a safe boundary; committed conversations were kept.'),100);else{console.error('[ChatHarbor] sync failed',err);chSetProgress(chT('目录同步失败','Sync failed'),err?.message||String(err),100);}}finally{chEndControlledRun();state.runSettings=null;renderList();}
         };
 
         searchInput.oninput=e=>{state.query=e.target.value||'';applyFilters();renderList();};
@@ -3592,7 +3609,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         sortSelect.onchange=e=>{state.sort=e.target.value;applyFilters();renderList();};
         startDateInput.onchange=e=>{state.startDate=e.target.value||'';applyFilters();renderList();};
         endDateInput.onchange=e=>{state.endDate=e.target.value||'';applyFilters();renderList();};
-        includeAttachmentsInput.onchange=e=>{state.includeAttachments=e.target.checked;};
+        includeAttachmentsInput.onchange=e=>{if(chSyncRun.active){e.target.checked=Boolean(state.runSettings?.includeAttachments);updateSettingsSummary();return;}state.includeAttachments=e.target.checked;updateSettingsSummary();};
         selectAllCheckbox.onchange=()=>{const allSelected=state.filtered.length>0&&state.filtered.every(item=>state.selected.has(item.id));if(allSelected){state.filtered.forEach(item=>state.selected.delete(item.id));}else{state.filtered.forEach(item=>state.selected.add(item.id));}renderList();};
         refreshBtn.onclick=async()=>{const keep=new Set(state.selected);await loadRemoteList(true);state.selected.clear();for(const id of keep)if(state.list.some(item=>item.id===id))state.selected.add(id);renderList();};
         closeBtn.onclick=closeDialog;
@@ -3605,7 +3622,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         cancelSyncBtn.onclick=()=>{if(!chSyncRun.active)return;chRequestCancel('USER_CANCELLED');chSetProgress(chT('正在取消同步','Cancelling sync'),chT('不会开始新的详情请求或新的会话事务；当前原子事务会先完成。','No new detail fetch or conversation transaction will start; the current atomic transaction will finish first.'),null);};
         overlay.onclick=e=>{if(e.target===overlay)closeDialog();};
         document.addEventListener('keydown',function esc(ev){if(ev.key==='Escape'&&document.body.contains(overlay)&&!chSyncRun.active&&!state.migrationActive){document.removeEventListener('keydown',esc);closeDialog();}});
-        chUpdateRunControlUi();updateTimeSummary();loadRemoteList();
+        chUpdateRunControlUi();updateTimeSummary();updateSettingsSummary();loadRemoteList();
     }
 
 '''
