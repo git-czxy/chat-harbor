@@ -1,0 +1,151 @@
+{
+  "generated_on": "2026-09-16",
+  "main_head_before_map": "014a51eff55091393d6a779f66b4c95654c8029e",
+  "legacy_reference_commit": "c1ce4590be06586389df1023051e34732b3e5d0e",
+  "historical_nodes": [
+    {
+      "tag": "gate-2",
+      "commit": "b8634a37b165e9ecb48182f1f3c2b2149835e352",
+      "artifact": "ChatHarbor_clean_gate2.zip",
+      "artifact_sha256": "b18fc9341551c1aec66aad6c4dbd5cfd1cb9f6fc5998b4ab17f7d2e81fc43ae7"
+    },
+    {
+      "tag": "gate-3",
+      "commit": "5ea9db1e8cea19d785fb36c9401bdb0b97941476",
+      "artifact": "ChatHarbor_clean_gate3.zip",
+      "artifact_sha256": "8c9f371a1994a14f1a06eae21ac655a89c9ecf0ce5e3e10a44d37e2d34b622c3"
+    },
+    {
+      "tag": "gate-3.1",
+      "commit": "97026fadd3a2a447c5ea526668694517de22b4ef",
+      "artifact": "ChatHarbor_clean_gate3_1.zip",
+      "artifact_sha256": "987efd0a172a91350de2159766448886494b3175e80eae33bbb77f05589e7546"
+    },
+    {
+      "tag": "gate-4a",
+      "commit": "2a8d21786d85fb9d50d8b770e2e6f92ff81fb19a",
+      "artifact": "ChatHarbor_clean_gate4a_preflight.zip",
+      "artifact_sha256": "7b2531ff8ccff0d875bd7aca38041e4aa609557d617f26c5b91fd6b8cde4bbf7"
+    },
+    {
+      "tag": "pre-v0.0.6.1-integrated",
+      "commit": "8ef48b46a14a47fae36266ac279e79d63b525988",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_2026-09-14.zip",
+      "artifact_sha256": "f108c070764855c957a75ddf455a60ae1018c33a0ebb0440c0c9e4345d7a8d41"
+    },
+    {
+      "tag": "v0.0.6.1",
+      "commit": "e71143f1f6d9ebd497ae058e9a76bcdac98d5985",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.6.1_hotfix.zip",
+      "artifact_sha256": "49e9ffd15de4d108d4f7ec207988fd91c5c15b0ea7be670af9d414c1ecfc8b6a"
+    },
+    {
+      "tag": "v0.0.7.0",
+      "commit": "59b86a76bafc849ed14033c59e28682e8a140324",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.7.0_conservative.zip",
+      "artifact_sha256": "710e44a6d62b53f9b73f12186de25922d44392043b9c9c21665384f9429f964e"
+    },
+    {
+      "tag": "v0.0.8.0",
+      "commit": "04f8def7296b5f8c2ab6e069aeadf6877957bc01",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.8.0_desktop_workspace.zip",
+      "artifact_sha256": "8e78c83c20d8332ce4cd3ccd36ab99cefa79466cdae7ba3d9d2485cb2122814b"
+    },
+    {
+      "tag": "v0.0.9.0",
+      "commit": "053a641c64b4b67bd3ee4f05a8d5d85c5b1f590b",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.9.0_streaming_sync.zip",
+      "artifact_sha256": "b27aacd20abcbc18a34c74d05cbf9deedb4817af68c82a9c94aa4a3bcf45a655"
+    },
+    {
+      "tag": "v0.0.9.1",
+      "commit": "a946c559c1e5ed10fc39f7ff5ff5e7703df5f159",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.9.1_batch_countdown.zip",
+      "artifact_sha256": "4f3727951bb961597b190a2d2e8556dd30db001fc61f8188e40480a663c61753"
+    },
+    {
+      "tag": "v0.0.9.2",
+      "commit": "9742ef519fc605716bf3db166ab7b741137e0519",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.9.2_cached_index_compact_rail.zip",
+      "artifact_sha256": "d0d01a55e727a759d67cfc8246bd58409d47f48b4ea803515078a18b154295ca"
+    },
+    {
+      "tag": "v0.0.9.3",
+      "commit": "c3eee39ffb1b6005127242d924091bcb727b6aca",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.9.3_ui_clarity.zip",
+      "artifact_sha256": "a4da3489128be896ab593ccce21d22b993baf53639b4f873b97d5e014b3ddb3c"
+    },
+    {
+      "tag": "v0.0.10.0",
+      "commit": "2c19bbad35f106ac15fd3606c3a012eed0b478dd",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.10.0_layout_v2.zip",
+      "artifact_sha256": "f8dbb2bec49d68ba22e4d46086a2ae05096a648200950a7552182a8a2b3d17fd"
+    },
+    {
+      "tag": "v0.0.10.1",
+      "commit": "3477d82d4048d22f13ff90b5697045a890b8a976",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.10.1_ui_state_lock.zip",
+      "artifact_sha256": "ce8ea65cd28304b21378b0322127ffe44dca4264488053f238e84dfde098fe7e"
+    },
+    {
+      "tag": "v0.0.11.0",
+      "commit": "9ca44c1929d3390af6f53471e8ac772b83e4db61",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.11.0_incremental_convergence_cache.zip",
+      "artifact_sha256": "c7692fbcd3d5869fad231ede450fc2fdd1bd0d18c829b5b9c57032db31408542"
+    },
+    {
+      "tag": "v0.0.11.1",
+      "commit": "92d0945975d8c5480c541e080388395c349aeb58",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.11.1_runtime_ux_hotfix.zip",
+      "artifact_sha256": "e86d7fcfd517ad7f92824559f37b4a19861b3f9af2b7490e9ec7f2b5072eec01"
+    },
+    {
+      "tag": "v0.0.11.2",
+      "commit": "78d9ae3916ce4579a1a9539ed55886f6ff131e3e",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.11.2_installation_hotfix.zip",
+      "artifact_sha256": "c3dca909a7843174892496b8fe0f17d3f88cb6b7872cca6abe51a7520bdfcd10"
+    },
+    {
+      "tag": "v0.0.11.3",
+      "commit": "5908454ddd55a51e6be631d80c3b22b2710d7902",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.11.3_build_invariant_hotfix.zip",
+      "artifact_sha256": "cf2b76231a644e57b007badc2583ba72c6618dfd79276767111316799e9b16e5"
+    },
+    {
+      "tag": "v0.0.11.4",
+      "commit": "a1f23c5cb991b6c9b485df841138d1e923f3fff8",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.11.4_attachment_incremental_hotfix.zip",
+      "artifact_sha256": "baf46faeef267ea44142f872fb07dcfb61c4189dff6d7f9f3f5a581641379556"
+    },
+    {
+      "tag": "v0.0.12.0",
+      "commit": "407d6efce3fdc33502c9e537fcfb94a1753dabf1",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.12.0_runtime_convergence.zip",
+      "artifact_sha256": "62fe635d582350edf0a33470f7d271e7b8024c8208b106dc4566965e0edecc46"
+    },
+    {
+      "tag": "v0.0.13.0",
+      "commit": "12d7fc58f586740d2325a5244e45979f4c1aceb8",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.13.0_lane_aware_discovery.zip",
+      "artifact_sha256": "9dca4b132f97335cdc2e0e489949500add928abe58b8873f843fa6a7d13ca1bb"
+    },
+    {
+      "tag": "v0.0.13.1",
+      "commit": "4c891915a0706c793adb8de8e998634c31bc070e",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.13.1_typed_failure_observable_retry.zip",
+      "artifact_sha256": "9ef98369c4065a228ddc5e3204e095125d59afe4327978fb56e371271d73adb7"
+    },
+    {
+      "tag": "v0.0.14.0",
+      "commit": "012e3cf7a4734ab533e127b2645157a8e955f617",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.14.0_user_facing_ux_convergence.zip",
+      "artifact_sha256": "283166a6845b7f18eba8731dd4a5b203f1ff2949700f861d48f1f4bbb043f81a"
+    },
+    {
+      "tag": "v0.0.14.1",
+      "commit": "4e5b52535f879bef08e07b3897cbbad59ae70522",
+      "artifact": "ChatHarbor_clean_lineage_integrated_sync_0.0.14.1_first_use_selection_ux.zip",
+      "artifact_sha256": "6a325066cd27d83120de3cdce37d54acae445178ef0f05f32654d32a47094768"
+    }
+  ]
+}
