@@ -1,5 +1,27 @@
 # ChatHarbor Changelog
 
+## 0.0.10.0 — 2026-09-14
+
+### Added
+- Introduced **Archive Layout v2** for the ChatGPT provider root: `conversations/` for non-project conversations and `projects/<project>/` for project conversations.
+- Added explicit Manifest axes `provider = chatgpt` and `archive_layout_version = 2`, while retaining `conversation_id` identity inside the provider root.
+- Added an explicit, resumable **Layout v1 → v2 local-only migration**. It never fetches remote conversation detail or re-downloads attachments.
+- Migration copies and SHA-256 verifies tracked files, commits new Manifest paths per conversation, then removes only old Manifest-tracked paths. Untracked legacy material is preserved.
+- Added migration recovery metadata so interruption after Manifest commit but before old-path cleanup can resume safely.
+- Added Local archive summary counts split into project / non-project conversations.
+
+### Changed
+- New writes now target Layout v2 namespaces, removing the ambiguity between root-level project folders and conversation `_files/` folders.
+- Normal synchronization is blocked while a v1 or incomplete layout migration is detected. After migration, ChatHarbor automatically runs the normal read-only Plan.
+- Included the previously prepared 0.0.9.3 UI clarity changes: `当前第 X / N 条` runtime wording and a distinct pale-amber `已归档` pill.
+
+### Extensibility
+- The selected ChatGPT directory is now explicitly a provider archive root. Future providers can use sibling roots such as `claude/` or `gemini/` without changing ChatGPT's internal layout. No additional provider adapter is implemented yet.
+- Globally, archive identity can be treated as `(provider, conversation_id)` while each provider Manifest keeps its native conversation identity.
+
+### Deferred
+- Source normalization / module split and removal of inherited ZIP/dead runtime code remain a separate pre-1.0 refactor after Layout v2 passes real migration smoke testing.
+
 ## 0.0.9.3 — 2026-09-14
 
 ### Changed

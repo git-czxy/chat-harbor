@@ -47,6 +47,10 @@ for marker in [
     "decorateProjectKnowledge",
     "state.remoteUniverse",
     "await runPreflight(true)",
+    'id="ch-migrate-layout-btn"',
+    "runLayoutMigration",
+    "chArchiveLayoutState",
+    "纯本地升级，不重新下载",
     "syncSelectedBtn.onclick=runSync",
     "selectAllCheckbox.indeterminate",
     "当前匹配中",
@@ -88,7 +92,7 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.9.3' in source
+assert '0.0.10.0' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';" in source
 assert 'background: #10a37f;' in source
 assert 'fabCollapseTimer = setTimeout' in source
@@ -131,4 +135,5 @@ print('PASS live MM:SS batch-pause countdown markers')
 
 assert '当前第 ${conversationIndex + 1} / ${conversationTotal} 条 · ${phase}' in core
 assert 'background:#fef3c7;color:#92400e' in picker
+assert "`${chT('本地','Local')} ${s.local || 0}（${chT('项目内','in projects')}" in picker
 print('PASS current-item progress wording + archived amber badge')

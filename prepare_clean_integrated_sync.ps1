@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Upstream = Join-Path $Root 'Tampermonkey.efa1f0f.js'
-$Output = Join-Path $Root 'ChatHarbor-IntegratedSync-0.0.9.3.user.js'
+$Output = Join-Path $Root 'ChatHarbor-IntegratedSync-0.0.10.0.user.js'
 $Patcher = Join-Path $Root 'ChatHarbor_IntegratedSync_patch.py'
 $Url = 'https://raw.githubusercontent.com/huhusmang/ChatGPT-Exporter/efa1f0f266d15c053af4ab4607b948a06332d9f7/Tampermonkey.js'
 

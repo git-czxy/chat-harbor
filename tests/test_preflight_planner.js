@@ -44,7 +44,7 @@ const localScan = {
   blockedIds:new Set(['H']),
   errors:[],
   errorsById:new Map(),
-  stats:{manifestTracked:5,rawConversationFiles:8,rawOnlyIds:1}
+  stats:{manifestTracked:5,manifestProject:0,manifestRoot:0,archiveLayoutVersion:2,provider:'chatgpt',migrationRequired:false,rawConversationFiles:8,rawOnlyIds:1}
 };
 const remote = [
   {id:'A',title:'A',update_time:100},
@@ -63,7 +63,7 @@ assert.deepStrictEqual(plan.summary, {
   newCount:1, remoteUpdateCandidateCount:2, renameCandidateCount:2,
   unchangedCount:1, metadataCandidateCount:0, rawOnlyVerifyCount:1, localOnlyCount:1, localOnlyReliable:true, remoteUniverseComplete:true, remoteUniverseNote:null, duplicateIdCount:2,
   errorCount:0, maximumFetchRequired:5,
-  manifestTracked:5, rawConversationFiles:8, rawOnlyIds:1
+  manifestTracked:5, localProjectCount:0, localRootCount:0, archiveLayoutVersion:2, provider:'chatgpt', migrationRequired:false, rawConversationFiles:8, rawOnlyIds:1
 });
 assert.strictEqual(plan.items.find(x=>x.id==='A').action,'UNCHANGED');
 assert.strictEqual(plan.items.find(x=>x.id==='B').action,'VERIFY_RENAMED');
@@ -101,7 +101,7 @@ assert.strictEqual(incompletePlan.localOnly.length,0);
 const metadataScan = {
   recordsById:new Map([['M',{conversation_id:'M',title:'M',remote_update_time:100,is_archived:false,project_id:null,project_title:null,tracking:'manifest'}]]),
   duplicateIds:new Set(), duplicates:[], blockedIds:new Set(), errors:[], errorsById:new Map(),
-  stats:{manifestTracked:1,rawConversationFiles:1,rawOnlyIds:0}
+  stats:{manifestTracked:1,manifestProject:0,manifestRoot:1,archiveLayoutVersion:2,provider:'chatgpt',migrationRequired:false,rawConversationFiles:1,rawOnlyIds:0}
 };
 const metadataPlan = chBuildPreflightPlan([{id:'M',title:'M',update_time:100,is_archived:true,projectId:null,projectTitle:null}], metadataScan);
 assert.strictEqual(metadataPlan.summary.metadataCandidateCount,1);

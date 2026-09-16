@@ -9,14 +9,18 @@
     // - content signature recording (not yet used for classification)
     // - visible progress feedback in the existing picker
     //
-    // Integrated Sync preserves the validated Gate 3 / 3.1 writer unchanged, then adds a
-    // separate read-only Archive Scan + Preflight Planner below.
-    // Final content classification, rename cleanup and selective write execution
-    // remain outside this gate.
+    // Integrated Sync preserves the validated Gate 3 / 3.1 writer invariants while routing
+    // physical paths through Archive Layout v2. Archive Scan, Planner, classification and
+    // selective transaction logic remain separate ChatHarbor layers.
 
     const CH_MANIFEST_NAME = 'ChatHarbor_manifest.json';
     const CH_MANIFEST_SCHEMA_VERSION = 1;
     const CH_SIGNATURE_VERSION = 'sha256-current_node+mapping-v1';
+    const CH_PROVIDER = 'chatgpt';
+    const CH_PROVIDER_LABEL = 'ChatGPT';
+    const CH_ARCHIVE_LAYOUT_VERSION = 2;
+    const CH_LAYOUT_CONVERSATIONS_DIR = 'conversations';
+    const CH_LAYOUT_PROJECTS_DIR = 'projects';
 
 
     // ======================== ChatHarbor Conservative Network Policy ========================
@@ -359,13 +363,65 @@
         return {
             schema_version: CH_MANIFEST_SCHEMA_VERSION,
             product: 'ChatHarbor',
-            source: 'ChatGPT',
+            source: CH_PROVIDER_LABEL,
+            provider: CH_PROVIDER,
+            archive_layout_version: CH_ARCHIVE_LAYOUT_VERSION,
             created_at: now,
             updated_at: now,
             identity: 'conversation_id',
             signature_version: CH_SIGNATURE_VERSION,
             conversations: {}
         };
+    }
+
+    function chManifestLayoutVersion(manifest) {
+        if (!manifest || typeof manifest !== 'object') return CH_ARCHIVE_LAYOUT_VERSION;
+        const raw = Number(manifest.archive_layout_version);
+        if (Number.isFinite(raw) && raw >= 1) return Math.trunc(raw);
+        // Pre-Layout-v2 manifests did not carry an explicit layout version.
+        return 1;
+    }
+
+    function chManifestProvider(manifest) {
+        const provider = String(manifest?.provider || '').trim().toLowerCase();
+        if (provider) return provider;
+        // Legacy clean-lineage manifests used source: ChatGPT without provider.
+        const source = String(manifest?.source || '').trim().toLowerCase();
+        return source === 'chatgpt' ? CH_PROVIDER : null;
+    }
+
+    function chManifestRequiresLayoutMigration(manifest) {
+        if (!manifest || typeof manifest !== 'object') return false;
+        if (manifest.migration_state?.type === 'archive_layout' &&
+            Number(manifest.migration_state?.to) === CH_ARCHIVE_LAYOUT_VERSION) return true;
+        return chManifestLayoutVersion(manifest) < CH_ARCHIVE_LAYOUT_VERSION;
+    }
+
+    function chValidateManifestCompatibility(manifest) {
+        if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+            throw new Error('manifest root is not an object');
+        }
+        if (manifest.schema_version !== CH_MANIFEST_SCHEMA_VERSION) {
+            throw new Error(`unsupported manifest schema: ${manifest.schema_version ?? 'missing'}`);
+        }
+        if (manifest.identity !== 'conversation_id') {
+            throw new Error(`unsupported manifest identity: ${manifest.identity ?? 'missing'}`);
+        }
+        if (manifest.signature_version && manifest.signature_version !== CH_SIGNATURE_VERSION) {
+            throw new Error(`unsupported signature version: ${manifest.signature_version}`);
+        }
+        if (!manifest.conversations || typeof manifest.conversations !== 'object' || Array.isArray(manifest.conversations)) {
+            throw new Error('manifest.conversations is invalid');
+        }
+        const provider = chManifestProvider(manifest);
+        if (provider && provider !== CH_PROVIDER) {
+            throw new Error(`provider mismatch: expected ${CH_PROVIDER}, found ${provider}`);
+        }
+        const layout = chManifestLayoutVersion(manifest);
+        if (layout > CH_ARCHIVE_LAYOUT_VERSION) {
+            throw new Error(`unsupported archive layout: ${layout}`);
+        }
+        return manifest;
     }
 
     async function chReadManifest(rootHandle) {
@@ -375,17 +431,7 @@
             const text = await file.text();
             const manifest = JSON.parse(text);
 
-            if (!manifest || typeof manifest !== 'object') {
-                throw new Error('manifest root is not an object');
-            }
-            if (manifest.schema_version !== CH_MANIFEST_SCHEMA_VERSION) {
-                throw new Error(
-                    `unsupported manifest schema: ${manifest.schema_version ?? 'missing'}`
-                );
-            }
-            if (!manifest.conversations || typeof manifest.conversations !== 'object' || Array.isArray(manifest.conversations)) {
-                throw new Error('manifest.conversations is invalid');
-            }
+            chValidateManifestCompatibility(manifest);
             return manifest;
         } catch (err) {
             if (err?.name === 'NotFoundError') return chNewManifest();
@@ -474,7 +520,7 @@
         const pct = chProgressPercent(conversationIndex, conversationTotal, fraction);
         const shortTitle = String(title || 'Untitled Conversation').slice(0, 42);
         chSetProgress(
-            `同步 ${conversationIndex + 1} / ${conversationTotal} · ${phase}`,
+            `当前第 ${conversationIndex + 1} / ${conversationTotal} 条 · ${phase}`,
             detail ? `${shortTitle} · ${detail}` : shortTitle,
             pct
         );
@@ -651,14 +697,8 @@
         const conversationId = chGetConversationId(entry, convData);
         const title = convData?.title || entry?.title || 'Untitled Conversation';
 
-        let targetDir = rootHandle;
-        let relativePrefix = '';
-
-        if (entry?.projectTitle) {
-            const projectDirName = sanitizeFilename(entry.projectTitle) || 'Untitled Project';
-            targetDir = await rootHandle.getDirectoryHandle(projectDirName, { create: true });
-            relativePrefix = `${projectDirName}/`;
-        }
+        const relativePrefix = chTargetRelativePrefix(entry);
+        const targetDir = await chEnsureRelativeDirectory(rootHandle, relativePrefix);
 
         let attachmentResult = null;
         const preserveExistingAssets =
@@ -776,6 +816,8 @@
             is_archived: convData?.is_archived ?? entry?.is_archived ?? false,
             project_id: entry?.projectId || null,
             project_title: entry?.projectTitle || null,
+            provider: CH_PROVIDER,
+            archive_layout_version: CH_ARCHIVE_LAYOUT_VERSION,
             content_signature: contentSignature,
             signature_version: CH_SIGNATURE_VERSION,
             json_path: `${relativePrefix}${jsonFilename}`,
@@ -1015,21 +1057,7 @@
         try {
             const handle = await rootHandle.getFileHandle(CH_MANIFEST_NAME);
             const manifest = await chReadJsonHandle(handle);
-            if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
-                throw new Error('manifest root is not an object');
-            }
-            if (manifest.schema_version !== CH_MANIFEST_SCHEMA_VERSION) {
-                throw new Error(`unsupported manifest schema: ${manifest.schema_version ?? 'missing'}`);
-            }
-            if (manifest.identity !== 'conversation_id') {
-                throw new Error(`unsupported manifest identity: ${manifest.identity ?? 'missing'}`);
-            }
-            if (manifest.signature_version !== CH_SIGNATURE_VERSION) {
-                throw new Error(`unsupported signature version: ${manifest.signature_version ?? 'missing'}`);
-            }
-            if (!manifest.conversations || typeof manifest.conversations !== 'object' || Array.isArray(manifest.conversations)) {
-                throw new Error('manifest.conversations is invalid');
-            }
+            chValidateManifestCompatibility(manifest);
             return { exists: true, manifest, error: null };
         } catch (err) {
             if (err?.name === 'NotFoundError') {
@@ -1250,9 +1278,14 @@
             stats: {
                 local: recordsById.size,
                 manifestTracked: manifestById.size,
+                manifestProject: Array.from(manifestById.values()).filter(record => record.project_id || record.project_title).length,
+                manifestRoot: Array.from(manifestById.values()).filter(record => !(record.project_id || record.project_title)).length,
                 rawConversationFiles: conversationJsonFiles,
                 rawUniqueIds: rawById.size,
                 rawOnlyIds: Array.from(recordsById.values()).filter(record => record.tracking === 'raw_only').length,
+                archiveLayoutVersion: manifestResult.manifest ? chManifestLayoutVersion(manifestResult.manifest) : CH_ARCHIVE_LAYOUT_VERSION,
+                provider: manifestResult.manifest ? (chManifestProvider(manifestResult.manifest) || CH_PROVIDER) : CH_PROVIDER,
+                migrationRequired: Boolean(manifestResult.manifest && chManifestRequiresLayoutMigration(manifestResult.manifest)),
                 jsonFilesSeen,
                 ignoredJsonFiles,
                 skippedAssetDirs
@@ -1497,6 +1530,11 @@
                 errorCount: errorCount + remoteErrors.length + localScan.errors.filter(error => !error.id).length,
                 maximumFetchRequired,
                 manifestTracked: localScan.stats.manifestTracked,
+                localProjectCount: localScan.stats.manifestProject || 0,
+                localRootCount: localScan.stats.manifestRoot || 0,
+                archiveLayoutVersion: localScan.stats.archiveLayoutVersion || CH_ARCHIVE_LAYOUT_VERSION,
+                provider: localScan.stats.provider || CH_PROVIDER,
+                migrationRequired: Boolean(localScan.stats.migrationRequired),
                 rawConversationFiles: localScan.stats.rawConversationFiles,
                 rawOnlyIds: localScan.stats.rawOnlyIds
             }
@@ -1643,6 +1681,9 @@
                 null
             );
         });
+        if (localScan.manifest && chManifestRequiresLayoutMigration(localScan.manifest)) {
+            throw new Error('Archive Layout v1 需要先执行纯本地 Layout v2 升级。');
+        }
 
         chSetProgress('目录预检', '生成同步计划（不抓取详情、不写盘）…', 70);
         const plan = chBuildPreflightPlan(remoteList, localScan, selectedIds, {
@@ -1703,13 +1744,291 @@
     }
 
     function chTargetRelativePrefix(entry) {
-        if (!entry?.projectTitle) return '';
+        if (!entry?.projectTitle) return `${CH_LAYOUT_CONVERSATIONS_DIR}/`;
         const projectDirName = sanitizeFilename(entry.projectTitle) || 'Untitled Project';
-        return `${projectDirName}/`;
+        return `${CH_LAYOUT_PROJECTS_DIR}/${projectDirName}/`;
+    }
+
+    function chTargetRelativePrefixForRecord(record) {
+        return chTargetRelativePrefix({ projectTitle: record?.project_title || null });
     }
 
     function chSplitPath(path) {
         return String(path || '').split('/').filter(Boolean);
+    }
+
+    function chPathBasename(path) {
+        const parts = chSplitPath(path);
+        return parts.length ? parts[parts.length - 1] : '';
+    }
+
+    function chPathDirname(path) {
+        const parts = chSplitPath(path);
+        parts.pop();
+        return parts.join('/');
+    }
+
+    async function chEnsureRelativeDirectory(rootHandle, relativeDir = '') {
+        let dir = rootHandle;
+        for (const segment of chSplitPath(relativeDir)) {
+            dir = await dir.getDirectoryHandle(segment, { create: true });
+        }
+        return dir;
+    }
+
+    async function chGetFileAtRelativePath(rootHandle, relativePath) {
+        const parts = chSplitPath(relativePath);
+        if (!parts.length) throw new Error('file path missing');
+        let dir = rootHandle;
+        for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i]);
+        const handle = await dir.getFileHandle(parts[parts.length - 1]);
+        return { handle, file: await handle.getFile() };
+    }
+
+    async function chRelativeFileExists(rootHandle, relativePath) {
+        if (!relativePath) return false;
+        try { await chGetFileAtRelativePath(rootHandle, relativePath); return true; }
+        catch (err) { if (err?.name === 'NotFoundError') return false; throw err; }
+    }
+
+    async function chSha256Bytes(data) {
+        const buffer = data instanceof ArrayBuffer
+            ? data
+            : ArrayBuffer.isView(data)
+                ? data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)
+                : await data.arrayBuffer();
+        return chHex(await crypto.subtle.digest('SHA-256', buffer));
+    }
+
+    async function chCopyRelativeFileVerified(rootHandle, sourcePath, targetPath) {
+        if (!sourcePath || !targetPath) throw new Error('migration source/target path missing');
+        if (sourcePath === targetPath) {
+            if (!await chRelativeFileExists(rootHandle, sourcePath)) throw new Error(`migration source missing: ${sourcePath}`);
+            return { copied: false, reused: true, bytes: (await chGetFileAtRelativePath(rootHandle, sourcePath)).file.size };
+        }
+        const source = await chGetFileAtRelativePath(rootHandle, sourcePath);
+        const sourceBytes = await source.file.arrayBuffer();
+        const sourceHash = await chSha256Bytes(sourceBytes);
+        const targetParts = chSplitPath(targetPath);
+        const targetName = targetParts.pop();
+        const targetDir = await chEnsureRelativeDirectory(rootHandle, targetParts.join('/'));
+        let targetExists = false;
+        try {
+            const existingHandle = await targetDir.getFileHandle(targetName);
+            const existingFile = await existingHandle.getFile();
+            targetExists = true;
+            if (existingFile.size === source.file.size && await chSha256Bytes(existingFile) === sourceHash) {
+                return { copied: false, reused: true, bytes: existingFile.size };
+            }
+            throw new Error(`migration target collision: ${targetPath}`);
+        } catch (err) {
+            if (targetExists || err?.name !== 'NotFoundError') throw err;
+        }
+        await chVerifiedDirectoryWrite(targetDir, targetName, sourceBytes);
+        const written = await targetDir.getFileHandle(targetName);
+        const writtenFile = await written.getFile();
+        if (writtenFile.size !== source.file.size || await chSha256Bytes(writtenFile) !== sourceHash) {
+            throw new Error(`migration verification failed: ${targetPath}`);
+        }
+        return { copied: true, reused: false, bytes: writtenFile.size };
+    }
+
+    function chMigrationExpectedRecord(record) {
+        const prefix = chTargetRelativePrefixForRecord(record);
+        const jsonName = chPathBasename(record?.json_path || '');
+        const markdownName = chPathBasename(record?.markdown_path || '');
+        if (!jsonName || !markdownName) throw new Error(`tracked conversation ${record?.conversation_id || ''} is missing JSON/Markdown path`);
+        const oldAssets = Array.isArray(record?.assets) ? record.assets : [];
+        const oldAssetDir = record?.asset_dir || (oldAssets.length ? chPathDirname(oldAssets[0]?.path || '') : null);
+        const assetFolderName = oldAssetDir ? chPathBasename(oldAssetDir) : null;
+        const newAssetDir = assetFolderName ? `${prefix}${assetFolderName}` : null;
+        const assets = oldAssets.map(asset => {
+            const name = chPathBasename(asset?.path || '') || asset?.name;
+            if (!name || !newAssetDir) throw new Error(`tracked asset path is incomplete for ${record?.conversation_id || ''}`);
+            return {
+                ...asset,
+                path: `${newAssetDir}/${name}`,
+                markdown_path: encodeRelativePath(`${assetFolderName}/${name}`)
+            };
+        });
+        return {
+            ...record,
+            json_path: `${prefix}${jsonName}`,
+            markdown_path: `${prefix}${markdownName}`,
+            asset_dir: newAssetDir,
+            assets
+        };
+    }
+
+    function chMigrationPreviousPaths(record) {
+        return {
+            json_path: record?.json_path || null,
+            markdown_path: record?.markdown_path || null,
+            asset_dir: record?.asset_dir || null,
+            assets: (record?.assets || []).map(asset => ({ path: asset?.path || null })).filter(asset => asset.path)
+        };
+    }
+
+    function chMigrationOldRecordFromMarker(currentRecord) {
+        const previous = currentRecord?.migration_previous_paths;
+        if (!previous) return null;
+        return {
+            json_path: previous.json_path || null,
+            markdown_path: previous.markdown_path || null,
+            asset_dir: previous.asset_dir || null,
+            assets: Array.isArray(previous.assets) ? previous.assets : []
+        };
+    }
+
+    async function chArchiveLayoutState(rootHandle) {
+        const result = await chReadManifestForScan(rootHandle);
+        if (result.error) throw new Error(result.error);
+        if (!result.exists || !result.manifest) {
+            return {
+                manifestExists: false,
+                provider: CH_PROVIDER,
+                layoutVersion: CH_ARCHIVE_LAYOUT_VERSION,
+                requiresMigration: false,
+                migrationInProgress: false,
+                total: 0,
+                project: 0,
+                root: 0
+            };
+        }
+        const manifest = result.manifest;
+        const records = Object.values(manifest.conversations || {});
+        return {
+            manifestExists: true,
+            provider: chManifestProvider(manifest) || CH_PROVIDER,
+            layoutVersion: chManifestLayoutVersion(manifest),
+            requiresMigration: chManifestRequiresLayoutMigration(manifest),
+            migrationInProgress: Boolean(manifest.migration_state?.type === 'archive_layout'),
+            total: records.length,
+            project: records.filter(record => record?.project_id || record?.project_title).length,
+            root: records.filter(record => !(record?.project_id || record?.project_title)).length,
+            manifest
+        };
+    }
+
+    async function chMigrateArchiveLayoutV1ToV2(rootHandle, onProgress = null) {
+        if (!rootHandle) throw new Error('Directory handle is required');
+        const manifest = await chReadManifest(rootHandle);
+        const layout = chManifestLayoutVersion(manifest);
+        if (layout > CH_ARCHIVE_LAYOUT_VERSION) throw new Error(`unsupported archive layout: ${layout}`);
+        if (layout === CH_ARCHIVE_LAYOUT_VERSION && !manifest.migration_state) {
+            return { migrated: 0, alreadyCurrent: true, cleanupWarnings: [], total: Object.keys(manifest.conversations || {}).length };
+        }
+
+        const entries = Object.entries(manifest.conversations || {});
+        const cleanupWarnings = [];
+        const legacyTopDirs = new Set();
+        let migrated = 0;
+
+        // Full local-only preflight: every tracked JSON/Markdown must exist before any new
+        // conversation is committed. This migration never fetches remote conversation detail.
+        for (const [id, record] of entries) {
+            const previous = record?.migration_previous_paths || chMigrationPreviousPaths(record);
+            for (const requiredPath of [previous.json_path, previous.markdown_path]) {
+                if (requiredPath && !await chRelativeFileExists(rootHandle, requiredPath) && !await chRelativeFileExists(rootHandle, chMigrationExpectedRecord(record)[requiredPath === previous.json_path ? 'json_path' : 'markdown_path'])) {
+                    throw new Error(`migration source missing for ${id}: ${requiredPath}`);
+                }
+            }
+            const first = chSplitPath(previous.json_path || '')[0];
+            if (record?.project_title && first && ![CH_LAYOUT_PROJECTS_DIR, CH_LAYOUT_CONVERSATIONS_DIR].includes(first)) legacyTopDirs.add(first);
+        }
+
+        manifest.provider = CH_PROVIDER;
+        manifest.source = CH_PROVIDER_LABEL;
+        manifest.migration_state = manifest.migration_state || {
+            type: 'archive_layout',
+            from: layout,
+            to: CH_ARCHIVE_LAYOUT_VERSION,
+            status: 'in_progress',
+            started_at: new Date().toISOString()
+        };
+        await chWriteManifest(rootHandle, manifest);
+
+        for (let index = 0; index < entries.length; index++) {
+            const [id] = entries[index];
+            let record = manifest.conversations[id];
+            if (!record) continue;
+            if (onProgress) onProgress({ index, total: entries.length, id, title: record.title || id, phase: 'prepare' });
+
+            // Resume-safe cleanup if a prior run committed the v2 paths but was interrupted before cleanup.
+            if (record.migration_previous_paths) {
+                const oldRecord = chMigrationOldRecordFromMarker(record);
+                const cleanup = await chCleanupTrackedOldPaths({ rootHandle, oldRecord, newRecord: record, manifest, currentId: id });
+                cleanupWarnings.push(...(cleanup.warnings || []).map(w => `${id}: ${w}`));
+                delete record.migration_previous_paths;
+                manifest.conversations[id] = record;
+                await chWriteManifest(rootHandle, manifest);
+                migrated++;
+                if (onProgress) onProgress({ index: index + 1, total: entries.length, id, title: record.title || id, phase: 'resumed' });
+                continue;
+            }
+
+            const oldRecord = JSON.parse(JSON.stringify(record));
+            const expected = chMigrationExpectedRecord(record);
+            const copies = [
+                [record.json_path, expected.json_path],
+                [record.markdown_path, expected.markdown_path]
+            ];
+            const oldAssets = Array.isArray(record.assets) ? record.assets : [];
+            for (let i = 0; i < oldAssets.length; i++) copies.push([oldAssets[i]?.path, expected.assets[i]?.path]);
+
+            for (const [sourcePath, targetPath] of copies) {
+                if (!sourcePath || !targetPath) continue;
+                await chCopyRelativeFileVerified(rootHandle, sourcePath, targetPath);
+            }
+
+            const committed = {
+                ...expected,
+                migration_previous_paths: chMigrationPreviousPaths(oldRecord)
+            };
+            manifest.conversations[id] = committed;
+            await chWriteManifest(rootHandle, manifest);
+
+            const cleanup = await chCleanupTrackedOldPaths({ rootHandle, oldRecord, newRecord: committed, manifest, currentId: id });
+            cleanupWarnings.push(...(cleanup.warnings || []).map(w => `${id}: ${w}`));
+            delete committed.migration_previous_paths;
+            manifest.conversations[id] = committed;
+            await chWriteManifest(rootHandle, manifest);
+            migrated++;
+            if (onProgress) onProgress({ index: index + 1, total: entries.length, id, title: committed.title || id, phase: 'committed' });
+        }
+
+        // Verify every canonical v2 JSON/Markdown before declaring the archive upgraded.
+        for (const [id, record] of Object.entries(manifest.conversations || {})) {
+            const expected = chMigrationExpectedRecord(record);
+            if (record.json_path !== expected.json_path || record.markdown_path !== expected.markdown_path) {
+                throw new Error(`layout verification failed for ${id}`);
+            }
+            if (!await chRelativeFileExists(rootHandle, record.json_path) || !await chRelativeFileExists(rootHandle, record.markdown_path)) {
+                throw new Error(`migrated files missing for ${id}`);
+            }
+        }
+
+        manifest.provider = CH_PROVIDER;
+        manifest.source = CH_PROVIDER_LABEL;
+        manifest.archive_layout_version = CH_ARCHIVE_LAYOUT_VERSION;
+        delete manifest.migration_state;
+        await chWriteManifest(rootHandle, manifest);
+
+        // Best-effort removal of now-empty legacy project containers only. Anything untracked
+        // prevents removal and is deliberately preserved.
+        for (const name of legacyTopDirs) {
+            try { await rootHandle.removeEntry(name, { recursive: false }); }
+            catch (err) { if (err?.name !== 'NotFoundError') cleanupWarnings.push(`legacy directory preserved: ${name}`); }
+        }
+
+        return {
+            migrated,
+            alreadyCurrent: false,
+            total: entries.length,
+            cleanupWarnings,
+            provider: CH_PROVIDER,
+            archiveLayoutVersion: CH_ARCHIVE_LAYOUT_VERSION
+        };
     }
 
     function chEncodeRelativeSegments(segments) {
@@ -1958,6 +2277,8 @@
             is_archived: convData.is_archived ?? remote.is_archived ?? existingRecord.is_archived ?? false,
             project_id: remote.projectId ?? existingRecord.project_id ?? null,
             project_title: remote.projectTitle ?? existingRecord.project_title ?? null,
+            provider: CH_PROVIDER,
+            archive_layout_version: CH_ARCHIVE_LAYOUT_VERSION,
             content_signature: classifiedItem.newSignature || existingRecord.content_signature,
             signature_version: CH_SIGNATURE_VERSION,
             synced_at: new Date().toISOString()
@@ -2232,6 +2553,9 @@
         const localScan = await chScanLocalArchiveReadOnly(rootHandle);
         if (localScan.manifestExists && !localScan.manifestReadable) {
             throw new Error(`${CH_MANIFEST_NAME} 不可读或不兼容，已停止同步以避免覆盖。`);
+        }
+        if (localScan.manifest && chManifestRequiresLayoutMigration(localScan.manifest)) {
+            throw new Error('检测到 Archive Layout v1 或未完成的布局迁移；请先完成纯本地 Layout v2 升级。');
         }
         const plan = chBuildPreflightPlan(remoteList, localScan, selected, {
             remoteUniverseComplete,

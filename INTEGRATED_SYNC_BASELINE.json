@@ -1,7 +1,7 @@
 {
   "product": "ChatHarbor",
-  "build": "Integrated Version-aware Selective Sync",
-  "status": "AUTOMATED_REGRESSION_PASS_REAL_UI_SMOKE_REQUIRED",
+  "build": "Archive Layout v2 + Local Migration + Version-aware Selective Sync",
+  "status": "AUTOMATED_REGRESSION_PASS_REAL_LAYOUT_MIGRATION_SMOKE_REQUIRED",
   "date": "2026-09-14",
   "clean_upstream": {
     "repository": "huhusmang/ChatGPT-Exporter",
@@ -18,6 +18,14 @@
     "non-blocking 100% progress"
   ],
   "integrated_stage_scope": [
+    "provider-aware archive root (current implementation: chatgpt)",
+    "Archive Layout v2: conversations/ + projects/<project>/",
+    "explicit archive_layout_version = 2 and provider = chatgpt in manifest",
+    "local-only resumable Layout v1 -> v2 migration with byte/hash verification",
+    "migration commit -> tracked-only cleanup with untracked legacy preservation",
+    "migration blocks normal sync until layout is canonical",
+    "local archive summary distinguishes project vs non-project tracked conversations",
+    "0.0.9.3 UI clarity: current-item wording + amber archived pill",
     "read-only local archive scan + automatic Plan after directory selection",
     "canonical remote universe shared by workspace UI and Planner",
     "project membership known / none / unknown distinction",
@@ -57,9 +65,12 @@
     "identity": "conversation_id",
     "manifest": "ChatHarbor_manifest.json",
     "local_only_auto_delete": false,
-    "untracked_legacy_asset_auto_delete": false
+    "untracked_legacy_asset_auto_delete": false,
+    "provider": "chatgpt",
+    "archive_layout_version": 2,
+    "layout_migration_remote_fetch": false
   },
-  "integrated_build_version": "0.0.9.3",
+  "integrated_build_version": "0.0.10.0",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,
@@ -82,9 +93,10 @@
       "sync selected"
     ],
     "archive_filter_default": "all",
-    "directory_flow": "remote ready -> choose directory -> automatic read-only scan/Plan; compact archive summary; manual Rescan local available",
+    "directory_flow": "remote ready -> choose provider archive root -> detect layout; v1 offers explicit local-only upgrade; v2 auto read-only scan/Plan; manual Rescan local available",
     "legacy_space_chooser_primary_entry": false,
-    "remote_scope_cache": "all/project scope reuses one canonical account index until explicit Refresh; Team is separate"
+    "remote_scope_cache": "all/project scope reuses one canonical account index until explicit Refresh; Team is separate",
+    "archive_summary": "Local N (in projects P / outside projects R) + New / Verify / Synced / Issues; migration state shown separately"
   },
-  "core_literal_sha256": "55ec07033d572ff08cad0a0bc48c71ff1e1d290a5a1c05db14f2ecd9117fa9ff"
+  "core_literal_sha256": "1c6f0a1dda616b3b1aff6b7560292340bc539fd357bc491945dd7db204cb02ea"
 }

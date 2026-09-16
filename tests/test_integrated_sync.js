@@ -53,7 +53,7 @@ chShowIntegratedSyncReport = ()=>{};
 
   const manifestLocal=(title='T',sig='same',time=100,extra={})=>({
     conversation_id:'X', title, content_signature:sig, remote_update_time:time, tracking:'manifest',
-    is_archived:false, project_id:null, project_title:null, json_path:'T_X.json', markdown_path:'T_X.md', assets:[], ...extra
+    is_archived:false, project_id:null, project_title:null, json_path:'conversations/T_X.json', markdown_path:'conversations/T_X.md', assets:[], ...extra
   });
   const baseItem=(local,remote={id:'X',title:'T',update_time:100,is_archived:false,projectId:null,projectTitle:null})=>({id:'X',remote,local});
 
@@ -88,12 +88,12 @@ chShowIntegratedSyncReport = ()=>{};
 
   // Attachment links remain valid when Markdown relocates across project directories.
   assert.strictEqual(
-    chRelativeMarkdownPath('New Project/','Old Project/T_files/a b.pdf'),
+    chRelativeMarkdownPath('projects/New Project/','projects/Old Project/T_files/a b.pdf'),
     '../Old%20Project/T_files/a%20b.pdf'
   );
   assert.strictEqual(
-    chRelativeMarkdownPath('','Old Project/T_files/a b.pdf'),
-    'Old%20Project/T_files/a%20b.pdf'
+    chRelativeMarkdownPath('conversations/','projects/Old Project/T_files/a b.pdf'),
+    '../projects/Old%20Project/T_files/a%20b.pdf'
   );
 
 
@@ -147,7 +147,7 @@ chShowIntegratedSyncReport = ()=>{};
 
   // In-place metadata change must commit only manifest, not rewrite files.
   const order3=[];
-  const localM={...manifestLocal('T','same',100),json_path:'T_X.json',markdown_path:'T_X.md'};
+  const localM={...manifestLocal('T','same',100),json_path:'conversations/T_X.json',markdown_path:'conversations/T_X.md'};
   const manifest3={conversations:{X:localM}};
   const metaItem={id:'X',finalAction:'METADATA_ONLY',remote:{id:'X',title:'T',update_time:101},convData:{conversation_id:'X',title:'T',update_time:101,__sig:'same'},newSignature:'same'};
   const metaApplied=await chApplyClassifiedSyncItem({
