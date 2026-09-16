@@ -577,7 +577,8 @@ directory_writer = r'''
             detail ? `${shortTitle} · ${detail}` : shortTitle,
             pct
         );
-        setFabStatus(btn, `💾 ${phase} (${Math.round(pct)}/100)`);
+        // Runtime progress is intentionally shown only in the workspace progress card.
+        // Keep the launcher free of duplicate percentage/status pills.
     }
 
     async function chWriteAttachmentsToDirectory(
@@ -2552,11 +2553,21 @@ directory_writer = r'''
             cancelled: false
         };
         let fetchIndex = 0;
-        const totalItems = Math.max(1, plan.items.length);
+        const fastItems = plan.items.filter(item => !item.needs_detail_fetch || item.action === 'ERROR' || item.action === 'DUPLICATE');
+        const workItems = plan.items.filter(item => item.needs_detail_fetch && item.action !== 'ERROR' && item.action !== 'DUPLICATE');
+        for (const item of fastItems) {
+            const classified = { ...item, finalAction: item.action, needs_sync: false, finalReasons: item.reasons || [] };
+            verification.items.push(classified);
+            verification.counts[classified.finalAction] = (verification.counts[classified.finalAction] || 0) + 1;
+        }
+        if (workItems.length && fastItems.length) {
+            chSetProgress('目录同步', `快速跳过 ${fastItems.length} 条已由 Manifest/预检确认的记录；待处理 ${workItems.length} 条`, 0);
+        }
+        const totalItems = Math.max(1, workItems.length);
 
-        for (let i = 0; i < plan.items.length; i++) {
+        for (let i = 0; i < workItems.length; i++) {
             let classified = null;
-            const item = plan.items[i];
+            const item = workItems[i];
             try {
                 await chControlCheckpoint('stream-sync');
                 if (!item.needs_detail_fetch || item.action === 'ERROR' || item.action === 'DUPLICATE') {
@@ -2595,7 +2606,7 @@ directory_writer = r'''
                 verification.items.push(classified);
                 verification.counts[classified.finalAction] = (verification.counts[classified.finalAction] || 0) + 1;
                 if (typeof onItemClassified === 'function') {
-                    try { onItemClassified(classified, { processed: i + 1, total: plan.items.length }); } catch (_) {}
+                    try { onItemClassified(classified, { processed: i + 1, total: workItems.length }); } catch (_) {}
                 }
 
                 if (CH_FINAL_SYNC_ACTIONS.has(classified.finalAction)) {
@@ -2977,7 +2988,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.11.0 Incremental Convergence + Remote Index Cache ========================
+# ======================== ChatHarbor 0.0.11.1 Runtime UX hotfix on Incremental Convergence ========================
 # The sync/runtime core above remains unchanged. This final bounded patch replaces only the
 # picker presentation, report presentation, and launcher presentation.
 
@@ -2991,7 +3002,7 @@ text = text.replace(locale_anchor, locale_replacement, 1)
 # Launcher: use a ChatHarbor-specific persisted position, green surface, right-edge default,
 # and automatic half-hide. Changing the storage key intentionally discards stale upstream
 # positions such as the top-left location observed during migration tests.
-text = text.replace("const FAB_STORAGE_KEY = 'chatgpt-exporter-fab-v1';", "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';", 1)
+text = text.replace("const FAB_STORAGE_KEY = 'chatgpt-exporter-fab-v1';", "const FAB_STORAGE_KEY = 'chatharbor-fab-v2';", 1)
 text = text.replace(
     "    background: rgba(255, 255, 255, .88);\n    color: #0d0d0d;",
     "    background: #10a37f;\n    color: #ffffff;",
@@ -3513,11 +3524,12 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                 if(selectedIds.size===0)return;
                 chBeginControlledRun(state.networkPolicy);
                 state.runSettings={includeAttachments:Boolean(state.includeAttachments),networkPolicy:{...chSyncRun.policy}};
-                renderList();chSetProgress(chT('目录同步','Directory sync'),`${chT('按选择范围开始流式核验与写入…','Starting streaming verify + commit…')} · ${chNetworkPolicySummary(chSyncRun.policy)}`,0);
+                const launcher=getExportButton(); launcher.classList.add('gre-busy'); const launcherPill=document.getElementById('gre-fab-status'); if(launcherPill)launcherPill.classList.remove('gre-visible');
+                renderList();chSetProgress(chT('目录同步','Directory sync'),`${chT('按实际待处理范围开始流式核验与写入…','Starting streaming verify + commit for actionable items…')} · ${chNetworkPolicySummary(chSyncRun.policy)}`,0);
                 const remote=state.remoteUniverse.length?state.remoteUniverse:state.list;
                 const result=await chRunIntegratedDirectorySync({rootHandle:root,remoteList:remote,selectedIds,workspaceId:state.workspaceId,includeAttachments:state.runSettings.includeAttachments,remoteUniverseComplete:state.remoteUniverseComplete,remoteUniverseNote:state.remoteUniverseNote,networkPolicy:chSyncRun.policy,onItemClassified:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction==='OBSERVATION_ONLY'?'UNCHANGED':item.finalAction==='ATTACHMENT_BACKFILL'?'UNCHANGED':item.finalAction);renderList();},onItemCommitted:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction==='OBSERVATION_ONLY'?'UNCHANGED':item.finalAction==='ATTACHMENT_BACKFILL'?'UNCHANGED':item.finalAction);}});
                 applyFinalStatuses(result);renderAll();
-            }catch(err){if(chIsCancellation(err))chSetProgress(chT('目录同步已取消','Sync cancelled'),chT('已在安全边界停止；已提交会话保留。','Stopped at a safe boundary; committed conversations were kept.'),100);else{console.error('[ChatHarbor] sync failed',err);chSetProgress(chT('目录同步失败','Sync failed'),err?.message||String(err),100);}}finally{chEndControlledRun();state.runSettings=null;renderList();}
+            }catch(err){if(chIsCancellation(err))chSetProgress(chT('目录同步已取消','Sync cancelled'),chT('已在安全边界停止；已提交会话保留。','Stopped at a safe boundary; committed conversations were kept.'),100);else{console.error('[ChatHarbor] sync failed',err);chSetProgress(chT('目录同步失败','Sync failed'),err?.message||String(err),100);}}finally{const launcher=getExportButton();launcher.classList.remove('gre-busy','gre-progress');const launcherPill=document.getElementById('gre-fab-status');if(launcherPill)launcherPill.classList.remove('gre-visible');fabScheduleCollapse(launcher);chEndControlledRun();state.runSettings=null;renderList();}
         };
 
         searchInput.oninput=e=>{state.query=e.target.value||'';applyFilters();renderList();};

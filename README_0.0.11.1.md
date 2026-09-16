@@ -1,6 +1,12 @@
-# ChatHarbor 0.0.11.0 — Incremental Convergence + Cached Remote Index
+# ChatHarbor 0.0.11.1 — Incremental Convergence + Cached Remote Index
 
 This release fixes the repeated-verification loop discovered during real use and turns the existing Manifest into the primary incremental-sync index. It also adds a persistent remote-list cache with a conservative latest-window early-stop refresh.
+
+## 0.0.11.1 runtime UX hotfix
+
+- Resets the launcher persistence namespace to `chatharbor-fab-v2`, so stale top-left coordinates from earlier builds no longer override the intended right-edge default. New user drag positions persist normally after this one-time reset.
+- Removes duplicate per-item percentage/status output beside the floating launcher. During a sync the launcher is still busy-locked, while the right-side runtime card is the single progress surface.
+- Preflight-confirmed no-op/error/duplicate records are accounted for immediately and omitted from the runtime work queue. Runtime progress now uses only actual detail-fetch candidates as its denominator, so a plan such as `398 selected / 120 actionable` begins at `1 / 120`, not `1 / 398`.
 
 ## What this version fixes
 
@@ -8,7 +14,7 @@ This release fixes the repeated-verification loop discovered during real use and
 
 The previous build could compare list metadata on the next run against metadata primarily saved from the detail endpoint. A conversation could therefore repeatedly become `VERIFY`, even after detail verification proved that its content had not changed.
 
-0.0.11.0 separates the observations:
+0.0.11.1 separates the observations:
 
 - `remote_list_*` fields are the checkpoint used by cheap preflight comparison;
 - `remote_update_time` remains the detail/source fact;
@@ -101,7 +107,7 @@ powershell -ExecutionPolicy Bypass -File .\prepare_clean_integrated_sync.ps1
 The build script downloads the fixed clean upstream commit, verifies the expected Git blob, and generates:
 
 ```text
-ChatHarbor-IntegratedSync-0.0.11.0.user.js
+ChatHarbor-IntegratedSync-0.0.11.1.user.js
 ```
 
 Install/update that generated userscript in Tampermonkey.

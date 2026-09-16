@@ -259,6 +259,26 @@ chShowIntegratedSyncReport = ()=>{};
   assert.strictEqual(streamResult.verification.detailFetchCount,2);
   chEndControlledRun();
 
+  // Preflight-confirmed fast-path items must be accounted for immediately and omitted from the runtime work queue.
+  const skipOrder=[];
+  chBuildPreflightPlan = ()=>({
+    items:[
+      {id:'U1',action:'UNCHANGED',needs_detail_fetch:false,remote:{id:'U1',title:'U1',update_time:1},local:{}},
+      {id:'N1',action:'NEW',needs_detail_fetch:true,remote:{id:'N1',title:'N1',update_time:2},local:null}
+    ],
+    summary:{scopeRemote:2,maximumFetchRequired:1,localOnlyReliable:true,localOnlyCount:0}
+  });
+  getConversation = async(id)=>{skipOrder.push(`fetch:${id}`);return {conversation_id:id,title:id,update_time:2,__sig:`sig-${id}`};};
+  chApplyClassifiedSyncItem = async({classifiedItem,conversationIndex,conversationTotal})=>{skipOrder.push(`commit:${classifiedItem.id}:${conversationIndex+1}/${conversationTotal}`);return {mode:'FILES_AND_MANIFEST',record:{},cleanup:{warnings:[]}};};
+  const skipResult=await chRunIntegratedDirectorySync({
+    rootHandle:{},remoteList:[{id:'U1'},{id:'N1'}],selectedIds:new Set(['U1','N1']),remoteUniverseComplete:true,
+    networkPolicy:{speedIndex:0,batchSize:1,batchPauseMinSec:0,batchPauseMaxSec:0,maxRetries:0}
+  });
+  assert.deepStrictEqual(skipOrder,['fetch:N1','commit:N1:1/1']);
+  assert.strictEqual(skipResult.verification.counts.UNCHANGED,1);
+  assert.strictEqual(skipResult.verification.detailFetchCount,1);
+  chEndControlledRun();
+
   console.log('PASS final classification matrix');
   console.log('PASS canonical remote-universe merge + ambiguity preservation');
   console.log('PASS remote-head stable fingerprint / change detection');
@@ -272,4 +292,5 @@ chShowIntegratedSyncReport = ()=>{};
   console.log('PASS tracked-only cleanup preserves legacy-untracked assets');
   console.log('PASS incomplete full-sync stop condition');
   console.log('PASS streaming fetch -> classify -> atomic commit ordering');
+  console.log('PASS preflight-confirmed items skip the runtime work queue');
 })().catch(e=>{console.error(e);process.exit(1);});

@@ -64,7 +64,7 @@ for marker in [
     "chT('不下载附件','Do not download attachments')",
     "chT('下载附件','Download attachments')",
     "chT('当前','Current')",
-    "按选择范围开始流式核验与写入",
+    "按实际待处理范围开始流式核验与写入…",
 ]:
     assert marker in picker, f'missing picker marker: {marker}'
 
@@ -98,8 +98,8 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.11.0' in source
-assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';" in source
+assert '0.0.11.1' in source
+assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v2';" in source
 assert 'background: #10a37f;' in source
 assert 'fabCollapseTimer = setTimeout' in source
 assert '复制详细报告' in values['inline_report_helpers']
@@ -174,6 +174,11 @@ assert '剩余 ${chFormatRemainingDuration(remaining)}' in core
 print('PASS live MM:SS batch-pause countdown markers')
 
 assert '当前第 ${conversationIndex + 1} / ${conversationTotal} 条 · ${phase}' in core
+assert 'const workItems = plan.items.filter' in core
+assert '快速跳过 ${fastItems.length} 条已由 Manifest/预检确认的记录' in core
+assert 'for (let i = 0; i < workItems.length; i++)' in core
+assert 'setFabStatus(btn, `💾 ${phase}' not in core
+assert "launcher.classList.add('gre-busy')" in picker
 assert 'background:#fef3c7;color:#92400e' in picker
 assert "`${chT('本地','Local')} ${s.local || 0}（${chT('项目内','in projects')}" in picker
 print('PASS current-item progress wording + archived amber badge')

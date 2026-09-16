@@ -1,6 +1,13 @@
 # ChatHarbor Changelog
 
-## 0.0.11.0 — 2026-09-14
+## 0.0.11.1 — 2026-09-15
+
+- Fixed stale launcher position persistence by moving ChatHarbor to the `chatharbor-fab-v2` state namespace; default position returns to the right edge.
+- Removed duplicate floating-launcher progress/status during directory sync; the workspace runtime card is now the single progress display.
+- Runtime sync queue now excludes entries already resolved by Manifest/preflight, while preserving their result counts. Progress numbering reflects actionable detail-fetch candidates only.
+- No change to the incremental convergence, Remote Index cache, conservative network policy, Archive Layout v2, or provider lineage.
+
+## 0.0.11.1 — 2026-09-14
 
 ### Fixed — incremental convergence
 - Fixed the repeated-verification loop caused by comparing remote-list metadata against Manifest facts written primarily from the detail endpoint.

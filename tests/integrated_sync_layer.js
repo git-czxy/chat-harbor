@@ -530,7 +530,8 @@
             detail ? `${shortTitle} · ${detail}` : shortTitle,
             pct
         );
-        setFabStatus(btn, `💾 ${phase} (${Math.round(pct)}/100)`);
+        // Runtime progress is intentionally shown only in the workspace progress card.
+        // Keep the launcher free of duplicate percentage/status pills.
     }
 
     async function chWriteAttachmentsToDirectory(
@@ -2505,11 +2506,21 @@
             cancelled: false
         };
         let fetchIndex = 0;
-        const totalItems = Math.max(1, plan.items.length);
+        const fastItems = plan.items.filter(item => !item.needs_detail_fetch || item.action === 'ERROR' || item.action === 'DUPLICATE');
+        const workItems = plan.items.filter(item => item.needs_detail_fetch && item.action !== 'ERROR' && item.action !== 'DUPLICATE');
+        for (const item of fastItems) {
+            const classified = { ...item, finalAction: item.action, needs_sync: false, finalReasons: item.reasons || [] };
+            verification.items.push(classified);
+            verification.counts[classified.finalAction] = (verification.counts[classified.finalAction] || 0) + 1;
+        }
+        if (workItems.length && fastItems.length) {
+            chSetProgress('目录同步', `快速跳过 ${fastItems.length} 条已由 Manifest/预检确认的记录；待处理 ${workItems.length} 条`, 0);
+        }
+        const totalItems = Math.max(1, workItems.length);
 
-        for (let i = 0; i < plan.items.length; i++) {
+        for (let i = 0; i < workItems.length; i++) {
             let classified = null;
-            const item = plan.items[i];
+            const item = workItems[i];
             try {
                 await chControlCheckpoint('stream-sync');
                 if (!item.needs_detail_fetch || item.action === 'ERROR' || item.action === 'DUPLICATE') {
@@ -2548,7 +2559,7 @@
                 verification.items.push(classified);
                 verification.counts[classified.finalAction] = (verification.counts[classified.finalAction] || 0) + 1;
                 if (typeof onItemClassified === 'function') {
-                    try { onItemClassified(classified, { processed: i + 1, total: plan.items.length }); } catch (_) {}
+                    try { onItemClassified(classified, { processed: i + 1, total: workItems.length }); } catch (_) {}
                 }
 
                 if (CH_FINAL_SYNC_ACTIONS.has(classified.finalAction)) {
