@@ -18,7 +18,7 @@ let mockRootList = [];
 async function listProjectSpaceConversations(){ return mockProjectList; }
 async function listConversations(){ return mockRootList; }
 global.document={getElementById:()=>null,addEventListener:()=>{},hidden:false};
-global.window={addEventListener:()=>{}};
+global.window={addEventListener:()=>{},fetch:async()=>({ok:true,status:200})};
 global.localStorage={getItem:()=>null,setItem:()=>{}};
 const snippet = fs.readFileSync(require('path').join(__dirname,'integrated_sync_layer.js'),'utf8');
 eval(snippet);
@@ -62,15 +62,17 @@ assert.deepStrictEqual(plan.summary, {
   remote:9, remoteUnique:8, scopeRemote:8, local:7,
   newCount:1, remoteUpdateCandidateCount:2, renameCandidateCount:2,
   unchangedCount:1, metadataCandidateCount:0, attachmentCandidateCount:0, rawOnlyVerifyCount:1, localOnlyCount:1, localOnlyReliable:true, remoteUniverseComplete:true, remoteUniverseNote:null, duplicateIdCount:2,
-  errorCount:0, maximumFetchRequired:5,
-  manifestTracked:5, localProjectCount:0, localRootCount:0, archiveLayoutVersion:2, provider:'chatgpt', migrationRequired:false, rawConversationFiles:8, rawOnlyIds:1, trackedFastChecked:0
+  errorCount:0, maximumFetchRequired:4,
+  manifestTracked:5, localProjectCount:0, localRootCount:0, archiveLayoutVersion:2, provider:'chatgpt', migrationRequired:false, rawConversationFiles:8, rawOnlyIds:1, trackedFastChecked:0, assetFastChecked:0, assetIntegrityIssues:0
 });
 assert.strictEqual(plan.items.find(x=>x.id==='A').action,'UNCHANGED');
 assert.strictEqual(plan.items.find(x=>x.id==='B').action,'VERIFY_RENAMED');
 assert.strictEqual(plan.items.find(x=>x.id==='C').action,'VERIFY_CHANGED');
 assert.strictEqual(plan.items.find(x=>x.id==='D').action,'VERIFY_CHANGED');
 assert.strictEqual(plan.items.find(x=>x.id==='E').action,'NEW');
-assert.strictEqual(plan.items.find(x=>x.id==='I').action,'VERIFY_CHANGED');
+assert.strictEqual(plan.items.find(x=>x.id==='I').action,'LOCAL_UNTRACKED');
+assert.strictEqual(plan.items.find(x=>x.id==='I').needs_detail_fetch,false);
+assert.strictEqual(plan.items.find(x=>x.id==='I').requires_user_confirmation,true);
 assert.strictEqual(plan.items.find(x=>x.id==='H').action,'DUPLICATE');
 assert.strictEqual(plan.items.find(x=>x.id==='F').action,'DUPLICATE');
 assert.deepStrictEqual(plan.localOnly.map(x=>x.id),['G']);

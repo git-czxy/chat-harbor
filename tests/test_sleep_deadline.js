@@ -1,7 +1,7 @@
 const fs=require('fs');
 const assert=require('assert');
 global.document={getElementById:()=>null,addEventListener:()=>{},hidden:false};
-global.window={addEventListener:()=>{}};
+global.window={addEventListener:()=>{},fetch:async()=>({ok:true,status:200})};
 global.localStorage={getItem:()=>null,setItem:()=>{}};
 let fakeNow=0;
 const realNow=Date.now;
@@ -26,9 +26,9 @@ eval(layer);
   chBeginControlledRun({speedIndex:3,batchSize:20,batchPauseMinSec:180,batchPauseMaxSec:300,maxRetries:0});
   await chControlledSleep(210000,'保守批次暂停','测试210秒');
   // OS sleep exceeded the deadline, so the original 210 seconds are not replayed.
-  // A normal 6 second guard jitter is added after wake.
-  assert(fakeNow>=7206000 && fakeNow<7207000,`unexpected fakeNow ${fakeNow}`);
-  assert(sleepCalls<=8,`timer-tick replay detected: ${sleepCalls} sleeps`);
+  // The selected safest preset adds an 18 second wake guard before the next request.
+  assert(fakeNow>=7218000 && fakeNow<7219000,`unexpected fakeNow ${fakeNow}`);
+  assert(sleepCalls<=25,`timer-tick replay detected: ${sleepCalls} sleeps`);
   chEndControlledRun();
   Math.random=realRandom; Date.now=realNow;
   console.log('PASS MM:SS batch-pause countdown formatter');

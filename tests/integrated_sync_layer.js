@@ -27,24 +27,65 @@
     const CH_REMOTE_HEAD_LIMIT = 20;
     const CH_REMOTE_FULL_REFRESH_MS = 24 * 60 * 60 * 1000;
     const CH_REMOTE_SYNC_FRESH_MS = 2 * 60 * 1000;
+    const CH_DIRECTORY_HANDLE_DB = 'chatharbor-directory-handle-v1';
+    const CH_DIRECTORY_HANDLE_STORE = 'handles';
+    const CH_DIRECTORY_HANDLE_KEY = 'chatgpt-default';
+
+    async function chOpenDirectoryHandleDb() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(CH_DIRECTORY_HANDLE_DB, 1);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(CH_DIRECTORY_HANDLE_STORE)) db.createObjectStore(CH_DIRECTORY_HANDLE_STORE);
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error || new Error('directory handle db open failed'));
+        });
+    }
+    async function chDirectoryHandleLoad() {
+        try {
+            const db = await chOpenDirectoryHandleDb();
+            return await new Promise(resolve => {
+                const req = db.transaction(CH_DIRECTORY_HANDLE_STORE, 'readonly').objectStore(CH_DIRECTORY_HANDLE_STORE).get(CH_DIRECTORY_HANDLE_KEY);
+                req.onsuccess = () => resolve(req.result || null);
+                req.onerror = () => resolve(null);
+            });
+        } catch (_) { return null; }
+    }
+    async function chDirectoryHandleSave(handle) {
+        try {
+            const db = await chOpenDirectoryHandleDb();
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(CH_DIRECTORY_HANDLE_STORE, 'readwrite');
+                tx.objectStore(CH_DIRECTORY_HANDLE_STORE).put(handle, CH_DIRECTORY_HANDLE_KEY);
+                tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error);
+            });
+        } catch (_) {}
+    }
+    async function chDirectoryHandlePermission(handle, request = false) {
+        if (!handle) return 'denied';
+        try {
+            let permission = await handle.queryPermission({ mode:'readwrite' });
+            if (permission !== 'granted' && request && handle.requestPermission) permission = await handle.requestPermission({ mode:'readwrite' });
+            return permission;
+        } catch (_) { return 'denied'; }
+    }
 
 
     // ======================== ChatHarbor Conservative Network Policy ========================
     // Clean reimplementation of the historical ChatHarbor conservative behavior contract.
-    const CH_NETWORK_POLICY_KEY = 'chatharbor_network_policy_v1';
+    const CH_NETWORK_POLICY_KEY = 'chatharbor_network_policy_v2';
     const CH_SPEED_LEVELS = [
-        { name: '1. 最快（上游）', base: 600, jitter: 400 },
-        { name: '2. 较快', base: 1500, jitter: 1000 },
-        { name: '3. 中等', base: 3000, jitter: 2000 },
-        { name: '4. 较慢（推荐）', base: 6000, jitter: 4000 },
-        { name: '5. 很慢', base: 9000, jitter: 6000 },
-        { name: '6. 最慢', base: 12000, jitter: 8000 }
+        { name: '少量任务（较快）', base: 4000, jitter: 3000, batchSize: 15, pauseMinSec: 60, pauseMaxSec: 90 },
+        { name: '日常使用（平衡）', base: 8000, jitter: 4000, batchSize: 12, pauseMinSec: 90, pauseMaxSec: 120 },
+        { name: '大量任务（更稳）', base: 12000, jitter: 6000, batchSize: 10, pauseMinSec: 120, pauseMaxSec: 180 },
+        { name: '保守模式（最稳）', base: 18000, jitter: 7000, batchSize: 8, pauseMinSec: 180, pauseMaxSec: 300 }
     ];
     const CH_DEFAULT_NETWORK_POLICY = Object.freeze({
-        speedIndex: 3,
-        batchSize: 20,
-        batchPauseMinSec: 180,
-        batchPauseMaxSec: 300,
+        speedIndex: 2,
+        batchSize: 10,
+        batchPauseMinSec: 120,
+        batchPauseMaxSec: 180,
         maxRetries: 2
     });
 
@@ -107,7 +148,303 @@
 
     function chNetworkPolicySummary(policy) {
         const p = chNormalizeNetworkPolicy(policy);
-        return `${CH_SPEED_LEVELS[p.speedIndex].name} · 每批 ${p.batchSize} · 批间 ${p.batchPauseMinSec}-${p.batchPauseMaxSec} 秒`;
+        return CH_SPEED_LEVELS[p.speedIndex].name;
+    }
+
+    function chNetworkPolicyDetail(policy) {
+        const p = chNormalizeNetworkPolicy(policy);
+        const speed = CH_SPEED_LEVELS[p.speedIndex];
+        const minSec = Math.round(speed.base / 1000);
+        const maxSec = Math.round((speed.base + speed.jitter) / 1000);
+        return `对话间隔 ${minSec}–${maxSec} 秒 · 每 ${p.batchSize} 条休息 ${p.batchPauseMinSec}–${p.batchPauseMaxSec} 秒`;
+    }
+
+    // ======================== Shared ChatHarbor Backend Scheduler ========================
+    // One scheduler owns serialization, global HTTP 429 cooldown and retry classification,
+    // but request lanes keep different cadences. Discovery must remain responsive; expensive
+    // conversation detail remains conservative; attachment metadata is rate-limited without
+    // inheriting the full detail delay. Signed/direct binary transfers remain a separate path.
+    const chRawChatHarborFetch = window.fetch.bind(window);
+    const CH_BACKEND_LANE_DISCOVERY = 'discovery';
+    const CH_BACKEND_LANE_DETAIL = 'detail';
+    const CH_BACKEND_LANE_ATTACHMENT = 'attachment';
+    const CH_DISCOVERY_BASE_MS = 1000;
+    const CH_DISCOVERY_JITTER_MS = 500;
+    const CH_ATTACHMENT_META_BASE_MS = 3000;
+    const CH_ATTACHMENT_META_JITTER_MS = 2000;
+    const CH_ATTACHMENT_META_BATCH_SIZE = 10;
+    const CH_ATTACHMENT_META_PAUSE_MIN_MS = 30000;
+    const CH_ATTACHMENT_META_PAUSE_JITTER_MS = 30000;
+    const chBackendScheduler = {
+        tail: Promise.resolve(),
+        cooldownUntil: 0,
+        cooldownReason: null,
+        rateLimitLevel: 0,
+        laneNextAllowedAt: {
+            discovery: 0,
+            detail: 0,
+            attachment: 0
+        },
+        laneRequestCount: {
+            discovery: 0,
+            detail: 0,
+            attachment: 0
+        }
+    };
+    let chNetworkStatusHook = null;
+    const chBackendContext = { detailTitle: null, detailId: null, attachmentName: null };
+
+    function chSetNetworkStatusHook(fn) {
+        chNetworkStatusHook = typeof fn === 'function' ? fn : null;
+    }
+
+    function chEmitNetworkStatus(info = null) {
+        try { if (chNetworkStatusHook) chNetworkStatusHook(info); } catch (_) {}
+    }
+
+    function chIsBackendControlUrl(resource) {
+        try {
+            const url = resource instanceof Request ? resource.url : String(resource || '');
+            const parsed = new URL(url, location.origin);
+            return parsed.origin === location.origin && parsed.pathname.startsWith('/backend-api/');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function chBackendLaneFor(resource) {
+        try {
+            const url = resource instanceof Request ? resource.url : String(resource || '');
+            const parsed = new URL(url, location.origin);
+            const path = parsed.pathname;
+            if (/^\/backend-api\/conversations\/?$/i.test(path)) return CH_BACKEND_LANE_DISCOVERY;
+            if (/^\/backend-api\/gizmos(?:\/|$)/i.test(path)) return CH_BACKEND_LANE_DISCOVERY;
+            if (/^\/backend-api\/files\/download\//i.test(path)) return CH_BACKEND_LANE_ATTACHMENT;
+            if (/\/interpreter\/download$/i.test(path)) return CH_BACKEND_LANE_ATTACHMENT;
+            if (/^\/backend-api\/conversation\/[^/]+\/?$/i.test(path)) return CH_BACKEND_LANE_DETAIL;
+            return CH_BACKEND_LANE_DETAIL;
+        } catch (_) {
+            return CH_BACKEND_LANE_DETAIL;
+        }
+    }
+
+    function chBackendPolicy() {
+        return chNormalizeNetworkPolicy(chSyncRun?.active ? chSyncRun.policy : chLoadNetworkPolicy());
+    }
+
+    function chBackendRequestDescriptor(resource, lane = null) {
+        try {
+            const url = resource instanceof Request ? resource.url : String(resource || '');
+            const parsed = new URL(url, location.origin);
+            const path = parsed.pathname;
+            const resolvedLane = lane || chBackendLaneFor(resource);
+            if (/^\/backend-api\/conversations\/?$/i.test(path)) return '云端对话';
+            if (/^\/backend-api\/gizmos\/snorlax\/sidebar/i.test(path)) return '项目对话';
+            const projectMatch = path.match(/^\/backend-api\/gizmos\/([^/]+)\/conversations/i);
+            if (projectMatch) return `项目对话 · ${projectMatch[1].slice(0, 18)}`;
+            if (resolvedLane === CH_BACKEND_LANE_ATTACHMENT) {
+                const label = chBackendContext.attachmentName;
+                if (label) return `附件 · ${String(label).slice(0, 52)}`;
+                const fileMatch = path.match(/^\/backend-api\/files\/download\/([^/]+)/i);
+                if (fileMatch) return `附件 · ${fileMatch[1].slice(0, 28)}`;
+                return '附件信息';
+            }
+            if (resolvedLane === CH_BACKEND_LANE_DETAIL) {
+                const label = chBackendContext.detailTitle;
+                if (label) return `对话 · ${String(label).slice(0, 52)}`;
+                const detailMatch = path.match(/^\/backend-api\/conversation\/([^/]+)/i);
+                if (detailMatch) return `对话 · ${detailMatch[1].slice(0, 18)}`;
+                return '对话内容';
+            }
+            return 'ChatGPT 请求';
+        } catch (_) {
+            return lane === CH_BACKEND_LANE_DISCOVERY ? '云端对话' : lane === CH_BACKEND_LANE_ATTACHMENT ? '附件信息' : '对话内容';
+        }
+    }
+
+    function chRetryDelayForFailure({ status = null, lane = CH_BACKEND_LANE_DETAIL, attempt = 1, binary = false } = {}) {
+        const n = Math.max(1, Number(attempt) || 1);
+        if (status === 429) return 300000 * n;
+        if (status === 401 || status === 403 || status === 404) return null;
+        if (status != null && !(status >= 500 && status <= 599)) return null;
+        if (binary) return 10000 * n;
+        if (lane === CH_BACKEND_LANE_DISCOVERY) return 5000 * n;
+        if (lane === CH_BACKEND_LANE_ATTACHMENT) return 5000 * n;
+        return 15000 * n;
+    }
+
+    function chRetryPrimary(status, binary = false) {
+        if (status === 429) return '请求过多，暂时休息';
+        if (status >= 500 && status <= 599) return `服务器暂时出错（${status}）`;
+        return binary ? '附件下载网络异常' : '网络连接异常';
+    }
+
+    function chLaneDelayMs(lane, policy) {
+        if (lane === CH_BACKEND_LANE_DISCOVERY) {
+            return CH_DISCOVERY_BASE_MS + Math.random() * CH_DISCOVERY_JITTER_MS;
+        }
+        const factor = 1 + 0.5 * Math.max(0, Number(chBackendScheduler.rateLimitLevel || 0));
+        if (lane === CH_BACKEND_LANE_ATTACHMENT) {
+            return (CH_ATTACHMENT_META_BASE_MS + Math.random() * CH_ATTACHMENT_META_JITTER_MS) * factor;
+        }
+        return chNetworkDelayMs(policy) * factor;
+    }
+
+    function chRegisterRateLimit() {
+        chBackendScheduler.rateLimitLevel = Math.min(4, Number(chBackendScheduler.rateLimitLevel || 0) + 1);
+    }
+
+    async function chSchedulerSleep(ms, primary = '', secondary = '', countdown = false) {
+        const duration = Math.max(0, Math.round(Number(ms) || 0));
+        if (!duration) return;
+        if (chSyncRun?.active) {
+            return chControlledSleep(duration, primary || '保守网络等待', secondary, { countdown });
+        }
+        const deadline = Date.now() + duration;
+        while (Date.now() < deadline) {
+            const remaining = Math.max(0, deadline - Date.now());
+            chEmitNetworkStatus({ primary, secondary, countdown, remainingMs: remaining });
+            await sleep(Math.min(1000, Math.max(1, remaining)));
+        }
+        chEmitNetworkStatus(null);
+    }
+
+    async function chWithBackendSerial(task) {
+        const previous = chBackendScheduler.tail;
+        let release;
+        chBackendScheduler.tail = new Promise(resolve => { release = resolve; });
+        await previous;
+        try { return await task(); }
+        finally { try { release(); } catch (_) {} }
+    }
+
+    async function chWaitForBackendGate(label = '', lane = CH_BACKEND_LANE_DETAIL) {
+        const now = Date.now();
+        const laneDeadline = Number(chBackendScheduler.laneNextAllowedAt?.[lane] || 0);
+        const cooldownDeadline = Number(chBackendScheduler.cooldownUntil || 0);
+        const deadline = Math.max(laneDeadline, cooldownDeadline);
+        if (deadline <= now) {
+            if (cooldownDeadline <= now) {
+                chBackendScheduler.cooldownUntil = 0;
+                chBackendScheduler.cooldownReason = null;
+            }
+            chEmitNetworkStatus(null);
+            return;
+        }
+        const waitMs = deadline - now;
+        const is429 = chBackendScheduler.cooldownReason === 'HTTP_429' && cooldownDeadline >= deadline;
+        const laneLabel = lane === CH_BACKEND_LANE_DISCOVERY ? '云端对话' : lane === CH_BACKEND_LANE_ATTACHMENT ? '附件信息' : '对话内容';
+        await chSchedulerSleep(
+            waitMs,
+            is429 ? '请求过多，暂时休息' : '等待下一次请求',
+            `${label ? `${label} · ` : ''}${is429 ? '稍后自动继续' : `${laneLabel}`}`,
+            is429
+        );
+    }
+
+    function chAfterBackendAttempt(policy, lane) {
+        const p = chNormalizeNetworkPolicy(policy);
+        chBackendScheduler.laneRequestCount[lane] = Number(chBackendScheduler.laneRequestCount[lane] || 0) + 1;
+        let delay = chLaneDelayMs(lane, p);
+        // Batch pauses belong only to expensive conversation-detail traffic. Discovery and
+        // attachment metadata have their own lightweight lane cadence and never consume the
+        // detail batch counter.
+        if (lane === CH_BACKEND_LANE_DETAIL && chBackendScheduler.laneRequestCount[lane] % p.batchSize === 0) {
+            delay = Math.max(delay, chNetworkBatchPauseMs(p) * (1 + 0.5 * Math.max(0, Number(chBackendScheduler.rateLimitLevel || 0))));
+        }
+        if (lane === CH_BACKEND_LANE_ATTACHMENT && chBackendScheduler.laneRequestCount[lane] % CH_ATTACHMENT_META_BATCH_SIZE === 0) {
+            const attachmentPause = CH_ATTACHMENT_META_PAUSE_MIN_MS + Math.random() * CH_ATTACHMENT_META_PAUSE_JITTER_MS;
+            delay = Math.max(delay, attachmentPause * (1 + 0.5 * Math.max(0, Number(chBackendScheduler.rateLimitLevel || 0))));
+        }
+        chBackendScheduler.laneNextAllowedAt[lane] = Math.max(
+            Number(chBackendScheduler.laneNextAllowedAt[lane] || 0),
+            Date.now() + delay
+        );
+    }
+
+    async function chBackendFetch(resource, options = {}) {
+        if (!chIsBackendControlUrl(resource)) return chRawChatHarborFetch(resource, options);
+        const lane = chBackendLaneFor(resource);
+        return chWithBackendSerial(async () => {
+            const policy = chBackendPolicy();
+            const maxAttempts = 1 + policy.maxRetries;
+            let lastError = null;
+            let lastResponse = null;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                if (chSyncRun?.active) await chControlCheckpoint('backend-request');
+                await chWaitForBackendGate('', lane);
+                try {
+                    const response = await chRawChatHarborFetch(resource, options);
+                    lastResponse = response;
+                    chAfterBackendAttempt(policy, lane);
+                    const status = Number(response?.status || 0);
+                    const requestLabel = chBackendRequestDescriptor(resource, lane);
+                    if (status === 429) {
+                        const retryMs = chRetryDelayForFailure({ status, lane, attempt });
+                        chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
+                        chBackendScheduler.cooldownReason = 'HTTP_429';
+                        chRegisterRateLimit();
+                        if (attempt < maxAttempts) {
+                            await chWaitForBackendGate(`${requestLabel} · 第 ${attempt}/${policy.maxRetries} 次重试前`, lane);
+                            continue;
+                        }
+                    } else if (status >= 500 && status <= 599 && attempt < maxAttempts) {
+                        const retryMs = chRetryDelayForFailure({ status, lane, attempt });
+                        await chSchedulerSleep(retryMs, chRetryPrimary(status), `${requestLabel} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                        continue;
+                    }
+                    // 401/403/404 and other non-retryable HTTP responses return immediately to
+                    // the owning operation, which records the concrete conversation/asset failure.
+                    return response;
+                } catch (err) {
+                    if (chIsCancellation(err)) throw err;
+                    lastError = err;
+                    chAfterBackendAttempt(policy, lane);
+                    if (attempt >= maxAttempts) break;
+                    const requestLabel = chBackendRequestDescriptor(resource, lane);
+                    const retryMs = chRetryDelayForFailure({ status: null, lane, attempt });
+                    await chSchedulerSleep(retryMs, chRetryPrimary(null), `${requestLabel} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                }
+            }
+            if (lastResponse) return lastResponse;
+            throw lastError || new Error('ChatHarbor backend request failed');
+        });
+    }
+
+    async function chDataTransferFetch(resource, options = {}) {
+        const policy = chBackendPolicy();
+        const maxAttempts = 1 + policy.maxRetries;
+        let lastError = null;
+        let lastResponse = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            if (chSyncRun?.active) await chControlCheckpoint('binary-transfer');
+            if ((chBackendScheduler.cooldownUntil || 0) > Date.now()) await chWaitForBackendGate('附件数据下载', CH_BACKEND_LANE_ATTACHMENT);
+            try {
+                const response = await chRawChatHarborFetch(resource, options);
+                lastResponse = response;
+                const status = Number(response?.status || 0);
+                if (status === 429) {
+                    const retryMs = chRetryDelayForFailure({ status, lane: CH_BACKEND_LANE_ATTACHMENT, attempt, binary: true });
+                    chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
+                    chBackendScheduler.cooldownReason = 'HTTP_429';
+                        chRegisterRateLimit();
+                    if (attempt < maxAttempts) { await chWaitForBackendGate(`附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`, CH_BACKEND_LANE_ATTACHMENT); continue; }
+                } else if (status >= 500 && status <= 599 && attempt < maxAttempts) {
+                    const retryMs = chRetryDelayForFailure({ status, lane: CH_BACKEND_LANE_ATTACHMENT, attempt, binary: true });
+                    await chSchedulerSleep(retryMs, chRetryPrimary(status, true), `附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                    continue;
+                }
+                return response;
+            } catch (err) {
+                if (chIsCancellation(err)) throw err;
+                lastError = err;
+                if (attempt >= maxAttempts) break;
+                const retryMs = chRetryDelayForFailure({ status: null, lane: CH_BACKEND_LANE_ATTACHMENT, attempt, binary: true });
+                await chSchedulerSleep(retryMs, chRetryPrimary(null, true), `附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+            }
+        }
+        if (lastResponse) return lastResponse;
+        throw lastError || new Error('ChatHarbor binary transfer failed');
     }
 
     const chSyncRun = {
@@ -123,7 +460,7 @@
     };
 
     function chBeginControlledRun(policy = null) {
-        if (chSyncRun.active) throw new Error('已有目录同步任务正在运行。');
+        if (chSyncRun.active) throw new Error('已有同步任务正在运行。');
         chSyncRun.active = true;
         chSyncRun.paused = false;
         chSyncRun.cancelRequested = false;
@@ -177,7 +514,7 @@
         return true;
     }
 
-    function chCancellationError(message = '目录同步已取消。') {
+    function chCancellationError(message = '同步已取消。') {
         const err = new Error(message);
         err.name = 'ChatHarborCancelled';
         err.code = 'CHATHARBOR_CANCELLED';
@@ -273,33 +610,24 @@
 
     function chRetryDelayMs(err, attempt) {
         const status = chErrorStatus(err);
-        if (status === 429) return 120000 * Math.max(1, attempt);
+        if (status === 429) return 300000 * Math.max(1, attempt);
         if (status && status >= 500) return 30000 * Math.max(1, attempt);
         if (status === 401 || status === 403) return null;
         return 30000 * Math.max(1, attempt);
     }
 
-    async function chGetConversationConservative(id, workspaceId = null) {
-        const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
-        const maxAttempts = 1 + policy.maxRetries;
-        let lastError = null;
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            await chControlCheckpoint('detail-fetch');
-            try {
-                return await getConversation(id, workspaceId);
-            } catch (err) {
-                if (chIsCancellation(err)) throw err;
-                lastError = err;
-                const delay = chRetryDelayMs(err, attempt);
-                if (attempt >= maxAttempts || delay == null) break;
-                await chControlledSleep(
-                    delay,
-                    '网络异常，保守重试等待',
-                    `${id} · 第 ${attempt}/${policy.maxRetries} 次重试前等待 ${Math.round(delay / 1000)} 秒`
-                );
-            }
+    async function chGetConversationConservative(id, workspaceId = null, title = null) {
+        await chControlCheckpoint('detail-fetch');
+        const previousTitle = chBackendContext.detailTitle;
+        const previousId = chBackendContext.detailId;
+        chBackendContext.detailTitle = title || null;
+        chBackendContext.detailId = id || null;
+        try {
+            return await getConversation(id, workspaceId);
+        } finally {
+            chBackendContext.detailTitle = previousTitle;
+            chBackendContext.detailId = previousId;
         }
-        throw lastError || new Error(`获取对话详情失败: ${id}`);
     }
 
     function chUpdateRunControlUi() {
@@ -490,18 +818,33 @@
         };
     }
 
+    const chRuntimeProgress = { active:false, processed:0, total:0, currentTitle:'' };
+
+    function chSetRuntimeProgress({ active = chRuntimeProgress.active, processed = chRuntimeProgress.processed, total = chRuntimeProgress.total, currentTitle = chRuntimeProgress.currentTitle } = {}) {
+        chRuntimeProgress.active = Boolean(active);
+        chRuntimeProgress.processed = Math.max(0, Number(processed) || 0);
+        chRuntimeProgress.total = Math.max(0, Number(total) || 0);
+        chRuntimeProgress.currentTitle = String(currentTitle || '');
+    }
+
     function chSetProgress(primary, secondary = '', percent = null) {
         const els = chProgressElements();
         if (!els.root) return;
-
         els.root.style.display = 'block';
-        if (els.primary) els.primary.textContent = primary || '';
-        if (els.secondary) els.secondary.textContent = secondary || '';
 
-        const normalized = Number.isFinite(percent)
-            ? Math.max(0, Math.min(100, Math.round(percent)))
-            : null;
-
+        let shownPrimary = primary || '';
+        let shownSecondary = secondary || '';
+        let normalized = Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null;
+        if (chRuntimeProgress.active && chRuntimeProgress.total > 0) {
+            const done = Math.min(chRuntimeProgress.processed, chRuntimeProgress.total);
+            normalized = Math.round((done / chRuntimeProgress.total) * 100);
+            shownPrimary = `会话进度 ${done} / ${chRuntimeProgress.total}`;
+            const current = chRuntimeProgress.currentTitle ? `当前：${chRuntimeProgress.currentTitle}` : '';
+            const action = [primary, secondary].filter(Boolean).join(' · ');
+            shownSecondary = [current, action].filter(Boolean).join('\n');
+        }
+        if (els.primary) els.primary.textContent = shownPrimary;
+        if (els.secondary) { els.secondary.textContent = shownSecondary; els.secondary.style.whiteSpace = 'pre-line'; }
         if (els.pct) els.pct.textContent = normalized == null ? '' : `${normalized}%`;
         if (els.bar) {
             els.bar.style.width = normalized == null ? '0%' : `${normalized}%`;
@@ -523,13 +866,13 @@
         detail = '',
         fraction = 0
     }) {
-        const pct = chProgressPercent(conversationIndex, conversationTotal, fraction);
         const shortTitle = String(title || 'Untitled Conversation').slice(0, 42);
-        chSetProgress(
-            `当前第 ${conversationIndex + 1} / ${conversationTotal} 条 · ${phase}`,
-            detail ? `${shortTitle} · ${detail}` : shortTitle,
-            pct
-        );
+        chSetRuntimeProgress({ currentTitle: shortTitle });
+        const shownPhase = phase === '下载附件' ? '正在下载附件'
+            : phase === '保留已有附件' ? '正在检查附件'
+            : ['写入 JSON','写入 Markdown','计算内容签名','提交 manifest','完成'].includes(phase) ? '正在保存'
+            : (phase || '正在处理');
+        chSetProgress(shownPhase, detail || '', null);
         // Runtime progress is intentionally shown only in the workspace progress card.
         // Keep the launcher free of duplicate percentage/status pills.
     }
@@ -589,6 +932,8 @@
         const files = [];
         const sandboxPaths = new Map();
         const usedNames = new Set();
+        const newlyWrittenRootPaths = [];
+        const rootHandle = options.rootHandle || null;
 
         if (references.length === 0) {
             return {
@@ -600,19 +945,30 @@
                 assetDirPath: null,
                 reusedCount: 0,
                 downloadedNow: 0,
-                missingBefore: 0
+                missingBefore: 0,
+                newlyWrittenRootPaths: []
             };
         }
 
         const folderName = generateUniqueFilename(convData).replace(/\.json$/i, '') + '_files';
-        const missingRefs = backfillPlan.missing;
+        const missingRefs = [...backfillPlan.missing];
+        const verifiedRetained = [];
+        for (const item of backfillPlan.retained) {
+            let reusable = true;
+            if (rootHandle && item.asset?.path) {
+                const meta = await chRelativeFileMeta(rootHandle, item.asset.path);
+                const expectedSize = Number(item.asset?.size_bytes || 0);
+                reusable = Boolean(meta.exists) && !(expectedSize > 0 && meta.size != null && meta.size !== expectedSize);
+            }
+            if (reusable) verifiedRetained.push(item);
+            else missingRefs.push(item.reference);
+        }
         const assetDir = missingRefs.length > 0
             ? await targetDir.getDirectoryHandle(folderName, { create: true })
             : null;
 
-        // Reuse every current-reference asset that the Manifest can identify.  This is the
-        // key incremental-attachment invariant: a backfill downloads only the missing set.
-        for (const item of backfillPlan.retained) {
+        // Reuse only assets whose Manifest identity and physical file both remain valid.
+        for (const item of verifiedRetained) {
             const file = chExistingAssetAsDownloadedFile(item.asset, targetPrefix);
             files.push(file);
             if (file.name) usedNames.add(file.name);
@@ -635,12 +991,20 @@
         for (let i = 0; i < missingRefs.length; i++) {
             const reference = missingRefs[i];
             try {
-                const downloaded = await fetchBinary(reference, convData, workspaceId);
+                const previousAttachmentName = chBackendContext.attachmentName;
+                chBackendContext.attachmentName = reference.name || reference.fileId || reference.sandboxPath || 'attachment';
+                let downloaded;
+                try {
+                    downloaded = await fetchBinary(reference, convData, workspaceId);
+                } finally {
+                    chBackendContext.attachmentName = previousAttachmentName;
+                }
                 const filename = uniqueAttachmentName(downloaded.filename, usedNames);
                 await writeBinary(assetDir, filename, downloaded.data);
 
                 const diskPath = `${folderName}/${filename}`;
                 const rootPath = `${targetPrefix}${diskPath}`;
+                newlyWrittenRootPaths.push(rootPath);
                 const relativePath = encodeRelativePath(diskPath);
 
                 files.push({
@@ -684,7 +1048,6 @@
                 });
             }
 
-            await sleep(150);
         }
 
         const primaryAssetDir = missingRefs.length > 0
@@ -701,7 +1064,8 @@
             reusedCount: retainedCount,
             downloadedNow: files.length - retainedCount,
             attemptedNow: missingRefs.length,
-            missingBefore: missingRefs.length
+            missingBefore: missingRefs.length,
+            newlyWrittenRootPaths
         };
     }
 
@@ -813,7 +1177,7 @@
                         fraction: 0.15 + ratio * 0.55
                     });
                 },
-                { targetPrefix: relativePrefix, existingRecord }
+                { targetPrefix: relativePrefix, existingRecord, rootHandle }
             );
         } else if (preserveExistingAssets) {
             attachmentResult = existingAttachmentResultOverride || chExistingAttachmentResult(existingRecord);
@@ -934,7 +1298,8 @@
             attachment_failed: attachmentFailed,
             attachment_failures: preserveExistingAssets ? (existingRecord?.attachment_failures || []) : (attachmentResult?.failures || []),
             attachments_preserved_without_download: Boolean(preserveExistingAssets),
-            synced_at: syncedAt
+            synced_at: syncedAt,
+            __ch_new_asset_paths: attachmentResult?.newlyWrittenRootPaths || []
         };
     }
 
@@ -1300,7 +1665,8 @@
         }
     }
 
-    async function chScanLocalArchiveReadOnly(rootHandle, onProgress = null) {
+    async function chScanLocalArchiveReadOnly(rootHandle, onProgress = null, options = {}) {
+        const checkAssets = Boolean(options?.checkAssets);
         if (!rootHandle) throw new Error('Directory handle is required');
 
         const manifestResult = await chReadManifestForScan(rootHandle);
@@ -1313,6 +1679,8 @@
         let ignoredJsonFiles = 0;
         let skippedAssetDirs = 0;
         let trackedFastChecked = 0;
+        let assetFastChecked = 0;
+        let assetIntegrityIssues = 0;
 
         if (manifestResult.error) errors.push({ type:'MANIFEST_ERROR', id:null, path:CH_MANIFEST_NAME, message:manifestResult.error });
 
@@ -1389,6 +1757,21 @@
                     errors.push({type:'MANIFEST_MARKDOWN_SIZE_MISMATCH',id,path:record.markdown_path,message:`tracked Markdown size ${meta.size} != manifest ${record.markdown_bytes}`});
                 }
             }
+            if (checkAssets && Array.isArray(record?.assets) && record.assets.length) {
+                let missing = 0, sizeMismatch = 0;
+                for (const asset of record.assets) {
+                    if (!asset?.path) { missing++; assetIntegrityIssues++; continue; }
+                    assetFastChecked++;
+                    const meta = await chRelativeFileMeta(rootHandle, asset.path);
+                    if (!meta.exists) { missing++; assetIntegrityIssues++; continue; }
+                    const expectedSize = Number(asset?.size_bytes || 0);
+                    if (expectedSize > 0 && meta.size != null && meta.size !== expectedSize) { sizeMismatch++; assetIntegrityIssues++; }
+                }
+                if (missing || sizeMismatch) {
+                    record.__chAssetIntegrity = { missing, sizeMismatch };
+                    record.attachment_state = 'partial';
+                }
+            }
         }
 
         const duplicateIds = new Set(); const duplicates=[];
@@ -1427,7 +1810,7 @@
                 archiveLayoutVersion:manifestResult.manifest?chManifestLayoutVersion(manifestResult.manifest):CH_ARCHIVE_LAYOUT_VERSION,
                 provider:manifestResult.manifest?(chManifestProvider(manifestResult.manifest)||CH_PROVIDER):CH_PROVIDER,
                 migrationRequired:Boolean(manifestResult.manifest&&chManifestRequiresLayoutMigration(manifestResult.manifest)),
-                jsonFilesSeen,ignoredJsonFiles,skippedAssetDirs,trackedFastChecked
+                jsonFilesSeen,ignoredJsonFiles,skippedAssetDirs,trackedFastChecked,assetFastChecked,assetIntegrityIssues
             }
         };
     }
@@ -1460,8 +1843,8 @@
             if(local.tracking!=='manifest'){
                 const timeRelation=chTimeRelation(remote?.update_time,local?.remote_update_time);
                 const updateCandidate=timeRelation!=='same'; const titleChanged=String(remote?.title||'')!==String(local?.title||'');
-                rawOnlyVerifyCount++; if(updateCandidate)remoteUpdateCandidateCount++; if(titleChanged)renameCandidateCount++; maximumFetchRequired++;
-                items.push({id,action:'VERIFY_CHANGED',remote,local,needs_detail_fetch:true,remote_update_candidate:updateCandidate,rename_candidate:titleChanged,metadata_candidate:false,attachment_candidate:includeAttachments,reasons:['LOCAL_RAW_NOT_MANIFEST_TRACKED',...(timeRelation==='different'?['REMOTE_UPDATE_TIME_DIFF']:timeRelation==='unknown'?['REMOTE_UPDATE_TIME_UNKNOWN']:[]),...(titleChanged?['TITLE_DIFF']:[])]});continue;
+                rawOnlyVerifyCount++; if(updateCandidate)remoteUpdateCandidateCount++; if(titleChanged)renameCandidateCount++;
+                items.push({id,action:'LOCAL_UNTRACKED',remote,local,needs_detail_fetch:false,requires_user_confirmation:true,remote_update_candidate:updateCandidate,rename_candidate:titleChanged,metadata_candidate:false,attachment_candidate:false,reasons:['LOCAL_RAW_NOT_MANIFEST_TRACKED',...(timeRelation==='different'?['REMOTE_UPDATE_TIME_DIFF']:timeRelation==='unknown'?['REMOTE_UPDATE_TIME_UNKNOWN']:[]),...(titleChanged?['TITLE_DIFF']:[])]});continue;
             }
 
             const baselineTitle=chRecordListTitle(local);
@@ -1493,7 +1876,7 @@
         return {items,localOnly,duplicateIds:Array.from(duplicateIds),duplicateDetails:[...localScan.duplicates,...remoteDuplicates],errors:[...localScan.errors,...remoteErrors],summary:{
             remote:allRemote.length,remoteUnique:remoteById.size,scopeRemote:scopeIds.size,local:localScan.recordsById.size,newCount,remoteUpdateCandidateCount,renameCandidateCount,unchangedCount,metadataCandidateCount,attachmentCandidateCount,rawOnlyVerifyCount,
             localOnlyCount:remoteUniverseComplete?localOnly.length:null,localOnlyReliable:remoteUniverseComplete,remoteUniverseComplete,remoteUniverseNote,duplicateIdCount:duplicateIds.size,
-            errorCount:errorCount+remoteErrors.length+localScan.errors.filter(e=>!e.id).length,maximumFetchRequired,manifestTracked:localScan.stats.manifestTracked,localProjectCount:localScan.stats.manifestProject||0,localRootCount:localScan.stats.manifestRoot||0,archiveLayoutVersion:localScan.stats.archiveLayoutVersion,provider:localScan.stats.provider,migrationRequired:Boolean(localScan.stats.migrationRequired),rawConversationFiles:localScan.stats.rawConversationFiles,rawOnlyIds:localScan.stats.rawOnlyIds,trackedFastChecked:localScan.stats.trackedFastChecked||0
+            errorCount:errorCount+remoteErrors.length+localScan.errors.filter(e=>!e.id).length,maximumFetchRequired,manifestTracked:localScan.stats.manifestTracked,localProjectCount:localScan.stats.manifestProject||0,localRootCount:localScan.stats.manifestRoot||0,archiveLayoutVersion:localScan.stats.archiveLayoutVersion,provider:localScan.stats.provider,migrationRequired:Boolean(localScan.stats.migrationRequired),rawConversationFiles:localScan.stats.rawConversationFiles,rawOnlyIds:localScan.stats.rawOnlyIds,trackedFastChecked:localScan.stats.trackedFastChecked||0,assetFastChecked:localScan.stats.assetFastChecked||0,assetIntegrityIssues:localScan.stats.assetIntegrityIssues||0
         }};
     }
 
@@ -1627,21 +2010,21 @@
     }
 
     async function chRunPreflightPlanner({ rootHandle, remoteList, selectedIds = null, remoteUniverseComplete = true, remoteUniverseNote = null, includeAttachments = false }) {
-        chSetProgress('目录预检', '只读扫描本地档案…', 0);
+        chSetProgress('快速检查', '只读检查本地文件…', 0);
         const localScan = await chScanLocalArchiveReadOnly(rootHandle, info => {
             const seen = info.jsonFilesSeen || 0;
             const found = info.conversationJsonFiles || 0;
             chSetProgress(
-                '目录预检 · 本地扫描',
+                '快速检查 · 本地扫描',
                 `已检查 JSON ${seen} · 识别对话 ${found}${info.path ? ` · ${info.path}` : ''}`,
                 null
             );
-        });
+        }, { checkAssets: true });
         if (localScan.manifest && chManifestRequiresLayoutMigration(localScan.manifest)) {
             throw new Error('Archive Layout v1 需要先执行纯本地 Layout v2 升级。');
         }
 
-        chSetProgress('目录预检', '生成同步计划（不抓取详情、不写盘）…', 70);
+        chSetProgress('快速检查', '生成同步计划（不抓取详情、不写盘）…', 70);
         const plan = chBuildPreflightPlan(remoteList, localScan, selectedIds, {
             remoteUniverseComplete,
             remoteUniverseNote,
@@ -1649,7 +2032,7 @@
         });
         const s = plan.summary;
         chSetProgress(
-            '目录预检完成',
+            '快速检查完成',
             `NEW ${s.newCount} · 待核验 ${s.maximumFetchRequired - s.newCount} · UNCHANGED ${s.unchangedCount} · LOCAL_ONLY ${s.localOnlyReliable ? s.localOnlyCount : 'UNKNOWN'}`,
             100
         );
@@ -1669,8 +2052,7 @@
         'UPDATED_AND_RENAMED',
         'METADATA_ONLY',
         'ATTACHMENT_BACKFILL',
-        'OBSERVATION_ONLY',
-        'LOCAL_UNTRACKED'
+        'OBSERVATION_ONLY'
     ]);
 
     function chMergeRemoteEntries(entries) {
@@ -1762,9 +2144,10 @@
         return headers;
     }
 
-    async function chFetchRootHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT) {
+    async function chFetchRootHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT, options = {}) {
         const headers=await chRemoteHeaders(workspaceId); const entries=[];
         for(const archived of [false,true]){
+            options.onProgress?.({stage:'head-root',message:`快速核对${archived?'已归档':'未归档'}列表…`});
             const r=await fetch(`/backend-api/conversations?offset=0&limit=${limit}&order=updated${archived?'&is_archived=true':''}`,{headers});
             if(!r.ok)throw new Error(`远端列表快速刷新失败 (${r.status})`);
             const j=await r.json();
@@ -1773,65 +2156,119 @@
         return entries;
     }
 
-    async function chFetchProjectHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT) {
+    async function chFetchProjectHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT, options = {}) {
         const resolved=resolveWorkspaceId(workspaceId); if(!resolved)return [];
+        options.onProgress?.({stage:'head-project',message:'快速核对项目列表…'});
         const projects=await getProjectSpaces(resolved,{conversationsPerGizmo:limit,ownedOnly:true}); const entries=[];
         for(const project of projects)for(const item of project.conversations||[])entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:item.is_archived??false,projectId:project.id,projectTitle:project.title,__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chProjectState:'known',__chSourceKey:`project:${project.id}`});
         return entries;
     }
 
-    async function chFetchRemoteHeadSnapshot(workspaceId = null) {
-        const entries=[...(await chFetchRootHead(workspaceId)),...(await chFetchProjectHead(workspaceId))];
+    async function chFetchRemoteHeadSnapshot(workspaceId = null, options = {}) {
+        const entries=[...(await chFetchRootHead(workspaceId,CH_REMOTE_HEAD_LIMIT,options)),...(await chFetchProjectHead(workspaceId,CH_REMOTE_HEAD_LIMIT,options))];
         return {entries,fingerprint:chHeadFingerprint(entries),validatedAt:Date.now()};
     }
 
-    async function chFetchRootFull(workspaceId = null) {
+    async function chFetchRootFull(workspaceId = null, options = {}) {
         const headers=await chRemoteHeaders(workspaceId); const entries=[];
         for(const archived of [false,true]){
-            let offset=0,hasMore=true;
+            let offset=0,hasMore=true,page=0;
             while(hasMore){
+                page+=1;
+                options.onProgress?.({stage:'root',archived,page,message:`读取${archived?'已归档':'未归档'}对话 · 第 ${page} 页…`});
                 const r=await fetch(`/backend-api/conversations?offset=${offset}&limit=${PAGE_LIMIT}&order=updated${archived?'&is_archived=true':''}`,{headers});
                 if(!r.ok)throw new Error(`远端列表完整刷新失败 (${r.status})`);
                 const j=await r.json(); const items=Array.isArray(j.items)?j.items:[];
                 for(const item of items)entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:archived,projectId:null,projectTitle:null,__chArchiveState:'known',__chProjectState:'unknown',__chSourceKey:`root:${archived?'archived':'active'}`});
                 hasMore=items.length===PAGE_LIMIT; offset+=items.length;
-                if(hasMore)await sleep(jitter());
+                options.onPartial?.({list:chMergeRemoteEntries(entries),complete:false,note:`root ${entries.length} · project complement pending`,validatedAt:0,refreshMode:'partial-root'});
             }
         }
         return chMergeRemoteEntries(entries);
     }
 
-    async function chFetchFullRemoteUniverse(workspaceId = null) {
-        const rootList=await chFetchRootFull(workspaceId);
+    async function chFetchProjectFull(workspaceId = null, options = {}) {
+        const resolved=resolveWorkspaceId(workspaceId); if(!resolved)return [];
+        const headers=await chRemoteHeaders(resolved);
+        options.onProgress?.({stage:'projects',message:'读取项目列表…'});
+        const projects=await getProjectSpaces(resolved,{conversationsPerGizmo:PROJECT_SIDEBAR_PREVIEW,ownedOnly:true});
+        const entries=[];
+        for(let projectIndex=0;projectIndex<projects.length;projectIndex++){
+            const project=projects[projectIndex];
+            let cursor='0'; let fetched=false;
+            options.onProgress?.({stage:'projects',current:projectIndex+1,total:projects.length,message:`读取项目 ${projectIndex+1}/${projects.length} · ${project.title}`});
+            do{
+                const r=await fetch(`/backend-api/gizmos/${project.id}/conversations?cursor=${cursor}`,{headers});
+                if(!r.ok){
+                    if(!fetched&&Array.isArray(project.conversations)&&project.conversations.length){
+                        project.conversations.forEach(item=>entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:item.is_archived??false,projectId:project.id,projectTitle:project.title,__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chProjectState:'known',__chSourceKey:`project:${project.id}`}));
+                        cursor=null; break;
+                    }
+                    throw new Error(`列举项目对话列表失败 (${r.status})`);
+                }
+                const j=await r.json();
+                for(const item of j.items||[])entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:item.is_archived??false,projectId:project.id,projectTitle:project.title,__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chProjectState:'known',__chSourceKey:`project:${project.id}`});
+                cursor=j.cursor||null; fetched=true;
+            }while(cursor);
+            options.onProjectPartial?.(entries.slice(),{current:projectIndex+1,total:projects.length,project});
+        }
+        return chMergeRemoteEntries(entries);
+    }
+
+    async function chFetchFullRemoteUniverse(workspaceId = null, options = {}) {
+        const rootList=await chFetchRootFull(workspaceId,{
+            onProgress:options.onProgress,
+            onPartial:partial=>options.onPartial?.(partial)
+        });
+        options.onPartial?.({list:rootList,complete:false,note:`root complete ${rootList.length} · project complement pending`,validatedAt:0,refreshMode:'partial-root-complete'});
         let projectList=[]; let complete=true; let note=null;
         try{
-            projectList=(await listProjectSpaceConversations(workspaceId)).map(item=>({...item,__chProjectState:'known',__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chSourceKey:`project:${item.projectId||'unknown'}`}));
+            projectList=await chFetchProjectFull(workspaceId,{
+                onProgress:options.onProgress,
+                onProjectPartial:(partialProjects,meta)=>{
+                    const merged=chMergeRemoteEntries(rootList.concat(partialProjects)).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':'unknown',__chArchiveState:item.__chArchiveState||'unknown'}));
+                    options.onPartial?.({list:merged,complete:false,note:`root ${rootList.length} · projects ${meta.current}/${meta.total}`,validatedAt:0,refreshMode:'partial-projects'});
+                }
+            });
         }catch(err){complete=false;note=`project complement failed: ${err?.message||String(err)}`;}
         const merged=chMergeRemoteEntries(rootList.concat(projectList)).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':complete?'none':'unknown',__chArchiveState:item.__chArchiveState||'unknown'}));
         return {list:merged,complete,note:note||`full remote index ${merged.length}`};
     }
 
-    async function chRefreshRemoteIndex(workspaceId = null, { forceFull = false } = {}) {
+    async function chRefreshRemoteIndex(workspaceId = null, { forceFull = false, onProgress = null, onPartial = null } = {}) {
         const flightKey=chRemoteCacheIdentity(workspaceId)||`volatile:${workspaceId||'default'}`;
         if(chRemoteRefreshFlights.has(flightKey))return chRemoteRefreshFlights.get(flightKey);
+        const callbacks={onProgress,onPartial};
         const promise=(async()=>{
             const cached=await chRemoteCacheGet(workspaceId); const now=Date.now();
             const needsPeriodicFull=!cached||cached.schema!==CH_REMOTE_CACHE_SCHEMA||cached.provider!==CH_PROVIDER||cached.complete!==true||!cached.fullFetchedAt||(now-cached.fullFetchedAt)>=CH_REMOTE_FULL_REFRESH_MS;
             if(forceFull||needsPeriodicFull){
-                const full=await chFetchFullRemoteUniverse(workspaceId); const head=await chFetchRemoteHeadSnapshot(workspaceId);
-                const snapshot={list:full.list,complete:full.complete,note:full.note,fullFetchedAt:now,validatedAt:head.validatedAt,headFingerprint:head.fingerprint};
-                if(full.complete)await chRemoteCachePut(workspaceId,snapshot);
-                return {...snapshot,refreshMode:'full'};
+                callbacks.onProgress?.({stage:'full',message:'完整刷新云端对话…'});
+                const progressiveCallbacks={...callbacks,onPartial:partial=>{
+                    callbacks.onPartial?.(partial);
+                    if(!cached?.complete && partial?.list?.length){
+                        void chRemoteCachePut(workspaceId,{...partial,complete:false,fullFetchedAt:Number(cached?.fullFetchedAt||0),validatedAt:Number(cached?.validatedAt||0),headFingerprint:cached?.headFingerprint||null,note:partial.note||'progressive incomplete remote index'});
+                    }
+                }};
+                const full=await chFetchFullRemoteUniverse(workspaceId,progressiveCallbacks);
+                let head={validatedAt:Date.now(),fingerprint:null};
+                try{head=await chFetchRemoteHeadSnapshot(workspaceId,callbacks);}catch(err){console.warn('[ChatHarbor] head fingerprint refresh failed after full snapshot',err);}
+                const snapshot={list:full.list,complete:full.complete,note:full.note,fullFetchedAt:now,validatedAt:head.validatedAt||Date.now(),headFingerprint:head.fingerprint||null};
+                // Incomplete snapshots are still useful UI/discovery cache, but never prove LOCAL_ONLY.
+                await chRemoteCachePut(workspaceId,snapshot);
+                return {...snapshot,refreshMode:full.complete?'full':'full-incomplete'};
             }
-            const head=await chFetchRemoteHeadSnapshot(workspaceId);
+            callbacks.onProgress?.({stage:'fast',message:`快速核对最新 ${CH_REMOTE_HEAD_LIMIT} 条…`});
+            const head=await chFetchRemoteHeadSnapshot(workspaceId,callbacks);
             if(head.fingerprint===cached.headFingerprint){
                 const snapshot={...cached,validatedAt:head.validatedAt,note:`fast refresh stable · head ${CH_REMOTE_HEAD_LIMIT}`};
                 await chRemoteCachePut(workspaceId,snapshot); return {...snapshot,refreshMode:'fast-stable'};
             }
-            const full=await chFetchFullRemoteUniverse(workspaceId); const refreshedHead=await chFetchRemoteHeadSnapshot(workspaceId);
+            callbacks.onProgress?.({stage:'full-after-change',message:'发现远端索引变化，转完整刷新…'});
+            const full=await chFetchFullRemoteUniverse(workspaceId,callbacks); const refreshedHead=await chFetchRemoteHeadSnapshot(workspaceId,callbacks);
             const snapshot={list:full.list,complete:full.complete,note:full.note,fullFetchedAt:Date.now(),validatedAt:refreshedHead.validatedAt,headFingerprint:refreshedHead.fingerprint};
-            if(full.complete)await chRemoteCachePut(workspaceId,snapshot);
-            return {...snapshot,refreshMode:'full-after-change'};
+            await chRemoteCachePut(workspaceId,snapshot);
+            return {...snapshot,refreshMode:full.complete?'full-after-change':'full-after-change-incomplete'};
         })().finally(()=>chRemoteRefreshFlights.delete(flightKey));
         chRemoteRefreshFlights.set(flightKey,promise); return promise;
     }
@@ -2217,7 +2654,7 @@
         const fetchTotal = fetchItems.length;
 
         if (fetchTotal > 0 && !await ensureAccessToken()) {
-            throw new Error('无法获取 Access Token，无法执行 detail verification。');
+            throw new Error('当前登录信息不可用。请刷新 ChatGPT 页面后再试。');
         }
 
         let fetchIndex = 0;
@@ -2240,7 +2677,7 @@
             );
             try {
                 await chControlCheckpoint('detail-verification');
-                const convData = await chGetConversationConservative(item.id, workspaceId);
+                const convData = await chGetConversationConservative(item.id, workspaceId, title);
                 resultItems.push(await chClassifyFetchedConversation(item, convData, { includeAttachments: false }));
             } catch (err) {
                 if (chIsCancellation(err)) throw err;
@@ -2253,20 +2690,6 @@
                 });
             }
             fetchIndex++;
-            if (fetchIndex < fetchTotal) {
-                const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
-                if (fetchIndex % policy.batchSize === 0) {
-                    const pauseMs = chNetworkBatchPauseMs(policy);
-                    await chControlledSleep(
-                        pauseMs,
-                        '保守批次暂停',
-                        `已核验 ${fetchIndex}/${fetchTotal}`,
-                        { countdown: true }
-                    );
-                } else {
-                    await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已核验 ${fetchIndex}/${fetchTotal}`);
-                }
-            }
         }
 
         const counts = {};
@@ -2446,8 +2869,20 @@
             conversationTotal
         });
 
+        const newAssetPaths = Array.isArray(record.__ch_new_asset_paths) ? [...record.__ch_new_asset_paths] : [];
+        delete record.__ch_new_asset_paths;
+        const priorManifestRecord = manifest.conversations?.[record.conversation_id] || null;
         manifest.conversations[record.conversation_id] = record;
-        await writeManifest(rootHandle, manifest);
+        try {
+            await writeManifest(rootHandle, manifest);
+        } catch (err) {
+            if (priorManifestRecord) manifest.conversations[record.conversation_id] = priorManifestRecord;
+            else delete manifest.conversations[record.conversation_id];
+            for (const path of newAssetPaths) {
+                try { await chRemoveTrackedEntry(rootHandle, path, false); } catch (_) {}
+            }
+            throw err;
+        }
 
         const cleanupResult = oldRecord
             ? await cleanup({
@@ -2565,24 +3000,25 @@
         remoteUniverseNote = null,
         networkPolicy = null,
         onItemClassified = null,
-        onItemCommitted = null
+        onItemCommitted = null,
+        onItemFailed = null
     }) {
         const selected = selectedIds instanceof Set && selectedIds.size > 0 ? selectedIds : null;
         if (!selected && !remoteUniverseComplete) {
-            throw new Error('全范围同步要求完整远端列表；当前 Remote universe 不完整，已停止写入。');
+            throw new Error('云端对话列表还没有加载完整。为避免漏同步，本轮不会写入，请稍后刷新重试。');
         }
         const ownsRun = !chSyncRun.active;
         if (ownsRun) chBeginControlledRun(networkPolicy || chLoadNetworkPolicy());
         else if (networkPolicy) chSyncRun.policy = chSaveNetworkPolicy(networkPolicy);
 
-        chSetProgress('目录同步', `扫描本地档案… · ${chNetworkPolicySummary(chSyncRun.policy)}`, 0);
+        chSetProgress('同步', `检查本地文件… · ${chNetworkPolicySummary(chSyncRun.policy)}`, 0);
         await chControlCheckpoint('local-scan');
-        const localScan = await chScanLocalArchiveReadOnly(rootHandle);
+        const localScan = await chScanLocalArchiveReadOnly(rootHandle, null, { checkAssets: true });
         if (localScan.manifestExists && !localScan.manifestReadable) {
-            throw new Error(`${CH_MANIFEST_NAME} 不可读或不兼容，已停止同步以避免覆盖。`);
+            throw new Error('本地保存记录无法读取。为避免覆盖现有文件，本轮同步已停止。');
         }
         if (localScan.manifest && chManifestRequiresLayoutMigration(localScan.manifest)) {
-            throw new Error('检测到 Archive Layout v1 或未完成的布局迁移；请先完成纯本地 Layout v2 升级。');
+            throw new Error('本地保存结构需要升级。请先完成升级，再开始同步。');
         }
         const plan = chBuildPreflightPlan(remoteList, localScan, selected, {
             remoteUniverseComplete,
@@ -2591,7 +3027,7 @@
         });
         const fetchTotal = plan.items.filter(item => item.needs_detail_fetch && item.action !== 'ERROR' && item.action !== 'DUPLICATE').length;
         if (fetchTotal > 0 && !await ensureAccessToken()) {
-            throw new Error('无法获取 Access Token，无法执行 detail verification。');
+            throw new Error('当前登录信息不可用。请刷新 ChatGPT 页面后再试。');
         }
 
         const manifest = await chReadManifest(rootHandle);
@@ -2616,14 +3052,15 @@
             verification.items.push(classified);
             verification.counts[classified.finalAction] = (verification.counts[classified.finalAction] || 0) + 1;
         }
-        if (workItems.length && fastItems.length) {
-            chSetProgress('目录同步', `快速跳过 ${fastItems.length} 条已由 Manifest/预检确认的记录；待处理 ${workItems.length} 条`, 0);
-        }
         const totalItems = Math.max(1, workItems.length);
+        chSetRuntimeProgress({ active: workItems.length > 0, processed: 0, total: workItems.length, currentTitle: '' });
+        if (workItems.length) chSetProgress('正在开始', '', 0);
 
         for (let i = 0; i < workItems.length; i++) {
             let classified = null;
             const item = workItems[i];
+            const currentTitle = item.remote?.title || item.local?.title || item.id;
+            chSetRuntimeProgress({ currentTitle: String(currentTitle || '').slice(0, 58) });
             try {
                 await chControlCheckpoint('stream-sync');
                 if (!item.needs_detail_fetch || item.action === 'ERROR' || item.action === 'DUPLICATE') {
@@ -2635,13 +3072,9 @@
                     };
                 } else {
                     const title = item.remote?.title || item.local?.title || item.id;
-                    chSetProgress(
-                        '核验并同步',
-                        `${fetchIndex + 1}/${fetchTotal} · ${String(title).slice(0, 58)}`,
-                        Math.min(98, Math.round((i / totalItems) * 98))
-                    );
+                    chSetProgress('正在获取对话', '', null);
                     try {
-                        const convData = await chGetConversationConservative(item.id, workspaceId);
+                        const convData = await chGetConversationConservative(item.id, workspaceId, title);
                         verification.detailFetchCount++;
                         fetchIndex++;
                         classified = await chClassifyFetchedConversation(item, convData, { includeAttachments });
@@ -2694,25 +3127,14 @@
                             action: classified.finalAction,
                             error: err?.message || String(err)
                         });
+                        if (typeof onItemFailed === 'function') {
+                            try { onItemFailed(classified, err); } catch (_) {}
+                        }
                     }
                 }
+                chSetRuntimeProgress({ processed: i + 1, currentTitle: String(currentTitle || '').slice(0, 58) });
+                chSetProgress('', '', null);
 
-                // One conservative network cadence governs the next detail request.  This runs
-                // after the current conversation has been fully classified and atomically committed.
-                if (item.needs_detail_fetch && fetchIndex < fetchTotal) {
-                    const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
-                    if (fetchIndex % policy.batchSize === 0) {
-                        const pauseMs = chNetworkBatchPauseMs(policy);
-                        await chControlledSleep(
-                            pauseMs,
-                            '保守批次暂停',
-                            `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`,
-                            { countdown: true }
-                        );
-                    } else {
-                        await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`);
-                    }
-                }
             } catch (err) {
                 if (chIsCancellation(err)) {
                     verification.cancelled = true;
@@ -2723,8 +3145,9 @@
             }
         }
 
+        chSetRuntimeProgress({ active:false });
         chSetProgress(
-            sync.cancelled ? '目录同步已取消' : (sync.failed ? '目录同步完成（存在失败）' : '目录同步完成'),
+            sync.cancelled ? '同步已取消' : (sync.failed ? '同步完成（有异常）' : '同步完成'),
             sync.cancelled
                 ? `已安全提交 ${sync.succeeded} 个会话；未开始的会话保持不变，下次可继续。`
                 : `写入成功 ${sync.succeeded} · 未变化 ${verification.counts.UNCHANGED || 0} · 异常 ${(verification.counts.ERROR || 0) + (verification.counts.DUPLICATE || 0)}`,

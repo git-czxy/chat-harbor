@@ -8,16 +8,16 @@ $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) {
     $python = Get-Command py -ErrorAction SilentlyContinue
     if (-not $python) { throw 'Python 3 is required for the UI/static regression suite.' }
-    & $python.Source -3 (Join-Path $Root 'tests\test_ui_0131.py')
+    & $python.Source -3 (Join-Path $Root 'tests\test_ui_0140.py')
     if ($LASTEXITCODE -ne 0) { throw 'UI/static regression failed.' }
-    & $python.Source -3 (Join-Path $Root 'tests\test_release_0131.py')
+    & $python.Source -3 (Join-Path $Root 'tests\test_release_0140.py')
 } else {
-    & $python.Source (Join-Path $Root 'tests\test_ui_0131.py')
+    & $python.Source (Join-Path $Root 'tests\test_ui_0140.py')
     if ($LASTEXITCODE -ne 0) { throw 'UI/static regression failed.' }
-    & $python.Source (Join-Path $Root 'tests\test_release_0131.py')
+    & $python.Source (Join-Path $Root 'tests\test_release_0140.py')
 }
 if ($LASTEXITCODE -ne 0) { throw 'Release invariant regression failed.' }
-& $python.Source (Join-Path $Root 'tests\test_scheduler_0131.py')
+& $python.Source (Join-Path $Root 'tests\test_scheduler_0140.py')
 if ($LASTEXITCODE -ne 0) { throw 'Scheduler lane regression failed.' }
 
 foreach ($test in @(
@@ -31,4 +31,4 @@ foreach ($test in @(
     if ($LASTEXITCODE -ne 0) { throw "Regression failed: $test" }
 }
 
-Write-Host 'All ChatHarbor 0.0.13.1 automated regressions passed.' -ForegroundColor Green
+Write-Host 'All ChatHarbor 0.0.14.0 automated regressions passed.' -ForegroundColor Green

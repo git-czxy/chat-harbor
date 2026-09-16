@@ -33,9 +33,9 @@ assert(chBackendLaneFor('/backend-api/conversation/abc') === CH_BACKEND_LANE_DET
 const p = chNormalizeNetworkPolicy(CH_DEFAULT_NETWORK_POLICY);
 const oldRandom = Math.random;
 Math.random = () => 0;
-assert(chLaneDelayMs(CH_BACKEND_LANE_DISCOVERY,p) === 600, 'discovery cadence');
-assert(chLaneDelayMs(CH_BACKEND_LANE_ATTACHMENT,p) === 1500, 'attachment metadata cadence');
-assert(chLaneDelayMs(CH_BACKEND_LANE_DETAIL,p) === 6000, 'detail cadence');
+assert(chLaneDelayMs(CH_BACKEND_LANE_DISCOVERY,p) === 1000, 'discovery cadence');
+assert(chLaneDelayMs(CH_BACKEND_LANE_ATTACHMENT,p) === 3000, 'attachment metadata cadence');
+assert(chLaneDelayMs(CH_BACKEND_LANE_DETAIL,p) === 12000, 'detail cadence');
 assert(chRetryDelayForFailure({status:500,lane:CH_BACKEND_LANE_DISCOVERY,attempt:1}) === 5000, 'discovery 5xx short retry');
 assert(chRetryDelayForFailure({status:503,lane:CH_BACKEND_LANE_DETAIL,attempt:2}) === 30000, 'detail 5xx retry');
 assert(chRetryDelayForFailure({status:500,lane:CH_BACKEND_LANE_ATTACHMENT,attempt:2}) === 10000, 'attachment metadata 5xx short retry');
@@ -43,22 +43,29 @@ assert(chRetryDelayForFailure({status:500,lane:CH_BACKEND_LANE_ATTACHMENT,attemp
 assert(chRetryDelayForFailure({status:401,lane:CH_BACKEND_LANE_DETAIL,attempt:1}) === null, '401 no retry');
 assert(chRetryDelayForFailure({status:403,lane:CH_BACKEND_LANE_DETAIL,attempt:1}) === null, '403 no retry');
 assert(chRetryDelayForFailure({status:404,lane:CH_BACKEND_LANE_ATTACHMENT,attempt:1}) === null, '404 no retry');
-assert(chRetryDelayForFailure({status:429,lane:CH_BACKEND_LANE_DISCOVERY,attempt:2}) === 240000, '429 global cooldown retained');
+assert(chRetryDelayForFailure({status:429,lane:CH_BACKEND_LANE_DISCOVERY,attempt:2}) === 600000, '429 global cooldown retained');
 chBackendContext.detailTitle = '退运邮件清点系统';
 assert(chBackendRequestDescriptor('/backend-api/conversation/abc', CH_BACKEND_LANE_DETAIL).includes('退运邮件清点系统'), 'detail retry label includes title');
 chBackendContext.attachmentName = 'report.zip';
 assert(chBackendRequestDescriptor('/backend-api/files/download/file-1', CH_BACKEND_LANE_ATTACHMENT).includes('report.zip'), 'attachment retry label includes name');
 chBackendContext.detailTitle = null; chBackendContext.attachmentName = null;
-assert(chRetryPrimary(500) === '服务端错误（HTTP 500）', '5xx is service error, not network error');
-chBackendScheduler.laneRequestCount.discovery = 19;
-chBackendScheduler.laneRequestCount.detail = 19;
+assert(chRetryPrimary(500) === '服务器暂时出错（500）', '5xx is plain-language service error');
+chBackendScheduler.laneRequestCount.discovery = 9;
+chBackendScheduler.laneRequestCount.detail = 9;
+chBackendScheduler.laneRequestCount.attachment = 9;
 const t0 = Date.now();
 chAfterBackendAttempt(p, CH_BACKEND_LANE_DISCOVERY);
 assert(chBackendScheduler.laneNextAllowedAt.discovery - t0 < 2000, 'discovery must not inherit batch pause');
 chAfterBackendAttempt(p, CH_BACKEND_LANE_DETAIL);
-assert(chBackendScheduler.laneNextAllowedAt.detail - t0 >= 179000, 'detail batch pause required');
+assert(chBackendScheduler.laneNextAllowedAt.detail - t0 >= 119000, 'detail batch pause required');
+chAfterBackendAttempt(p, CH_BACKEND_LANE_ATTACHMENT);
+assert(chBackendScheduler.laneNextAllowedAt.attachment - t0 >= 29000, 'attachment metadata batch pause required');
+chRegisterRateLimit();
+assert(chBackendScheduler.rateLimitLevel === 1, 'rate-limit level increments');
+assert(chLaneDelayMs(CH_BACKEND_LANE_DETAIL,p) === 18000, '429 adaptive slowdown applies');
 Math.random = oldRandom;
-console.log('PASS lane classification + independent cadence + detail-only batch pause');
+console.log('PASS lane classification + safer independent cadence + detail/attachment batch pauses');
+console.log('PASS 429 adaptive slowdown + 5/10 minute cooldown');
 console.log('PASS typed HTTP failure policy + request-context retry labels');
 '''
 

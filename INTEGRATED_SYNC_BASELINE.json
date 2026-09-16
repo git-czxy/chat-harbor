@@ -1,6 +1,6 @@
 {
   "product": "ChatHarbor",
-  "build": "Typed HTTP Failure + Observable Retry + Lane-aware Discovery + Runtime Convergence + Archive Layout v2",
+  "build": "User-facing UX Convergence + Safer Request Presets + Typed Retry + Lane-aware Scheduler + Archive Layout v2",
   "status": "AUTOMATED_REGRESSION_PASS_REAL_UI_AND_LIVE_ENDPOINT_SMOKE_REQUIRED",
   "date": "2026-09-15",
   "clean_upstream": {
@@ -32,23 +32,17 @@
     "candidate-only detail fetch",
     "streaming Fetch -> Classify -> Atomic Sync -> Manifest per conversation",
     "content-signature final verification",
-    "NEW / UPDATED / RENAMED_ONLY / UPDATED_AND_RENAMED / METADATA_ONLY / UNCHANGED",
     "LOCAL_ONLY protection",
     "DUPLICATE / ERROR blocking",
-    "LOCAL_UNTRACKED conservative adoption",
     "single selection-based sync scope",
     "three-state select-all over complete filtered results",
     "write -> verify -> manifest commit -> tracked-only cleanup ordering",
-    "conservative network policy with six speed levels",
-    "20-item default detail-fetch batching with randomized 180-300s inter-batch pause",
     "retry policy for retryable detail-fetch errors",
     "cooperative pause / resume / safe cancellation controls",
     "absolute wall-clock wait deadlines with sleep/wake reconciliation",
     "wake guard jitter before resumed network activity",
     "Desktop-first single-page workspace UI",
     "responsive 1240px-class wide layout with independent conversation-list scrolling",
-    "archive state pill beside sync state pill",
-    "automatic local rescan planning and manual Rescan local action",
     "manual remote Refresh preserving still-valid selections",
     "green persisted right-edge half-hidden launcher",
     "zh-CN / en-US ChatHarbor-owned UI and inline reports",
@@ -88,7 +82,17 @@
     "newly written attachment paths are best-effort cleaned if Manifest commit fails",
     "typed HTTP failure handling: 429 / 5xx / 401-403 / 404 / transport errors are distinct",
     "lane-specific bounded 5xx backoff: discovery and attachment metadata short, detail conservative, binary separate",
-    "retry status includes request context and current conversation/attachment label when available"
+    "retry status includes request context and current conversation/attachment label when available",
+    "fine-grained internal sync states retained; main UI converged to 已同步 / 待同步 / 需确认 / 异常",
+    "LOCAL_UNTRACKED is user-confirmation-only and is not auto-written by ordinary sync",
+    "stable runtime 会话进度 X / Y with current sub-task shown separately",
+    "directory actions separated: choose/change location, re-check current location, sync selected",
+    "last FileSystemDirectoryHandle persisted in IndexedDB and restored when permission allows",
+    "plain-language user UI; implementation details remain in details/diagnostics",
+    "use-case request presets: 4-7s/15/60-90, 8-12s/12/90-120, 12-18s/10/120-180, 18-25s/8/180-300",
+    "default large-task preset: 12-18s detail cadence, 10 items/batch, 120-180s break",
+    "attachment metadata cadence 3-5s with 10-request micro-batch and 30-60s break",
+    "HTTP 429 global cooldown 300s × attempt plus adaptive 50% lane slowdown per observed 429 (capped)"
   ],
   "explicitly_not_in_this_stage": [
     "full localization of every inherited upstream string outside ChatHarbor-owned UI",
@@ -107,13 +111,13 @@
     "remote_absence_requires_complete_universe": true,
     "remote_list_checkpoint": "remote_list_* Manifest observation fields"
   },
-  "integrated_build_version": "0.0.13.1",
+  "integrated_build_version": "0.0.14.0",
   "runtime_control": {
-    "default_speed": "6000ms base + 0-4000ms jitter",
-    "default_batch_size": 20,
+    "default_speed": "12000ms base + 0-6000ms jitter (大量任务 / 更稳)",
+    "default_batch_size": 10,
     "default_batch_pause_seconds": [
-      180,
-      300
+      120,
+      180
     ],
     "pause_semantics": "explicit user pause never auto-resumes; shared backend scheduler starts no new ChatHarbor control request while paused",
     "cancel_semantics": "stop at safe boundary; completed per-conversation commits remain authoritative",
@@ -122,10 +126,57 @@
     "remote_index_periodic_full_seconds": 86400,
     "remote_index_sync_fresh_seconds": 120,
     "remote_index_cache": "IndexedDB; disposable acceleration data; complete snapshots authoritative for absence checks; incomplete snapshots may persist for UI/recovery only",
-    "network_scheduler": "single serialized ChatHarbor /backend-api control gate with lane-aware cadence: discovery lightweight, detail user-policy cadence/batching, attachment metadata moderate; shared retry taxonomy and 429 cooldown",
-    "global_429_cooldown": "120s × retry attempt, shared across discovery/detail/attachment-metadata paths",
+    "network_scheduler": "single serialized ChatHarbor /backend-api control gate with lane-aware cadence: discovery 1.0-1.5s, detail use-case preset cadence/batching, attachment metadata 3-5s plus 10-request/30-60s micro-batch; shared retry taxonomy and 429 cooldown",
+    "global_429_cooldown": "300s × retry attempt (5 min first retry, 10 min second), shared across discovery/detail/attachment paths; each 429 increases detail/attachment cadence by 50% for the current page, capped at level 4",
     "binary_transfer": "separate data-transfer retry path; no ordinary control-plane pacing, but 429 advances global cooldown",
-    "http_failure_policy": "429 global cooldown; 5xx lane-specific bounded retry; 401/403/404 no blind retry; transport failures lane-specific retry"
+    "http_failure_policy": "429 global cooldown + adaptive slowdown; 5xx lane-specific bounded retry; 401/403/404 no blind retry; transport failures lane-specific retry",
+    "request_presets": {
+      "small_fast": {
+        "detail_interval_seconds": [
+          4,
+          7
+        ],
+        "batch_size": 15,
+        "batch_pause_seconds": [
+          60,
+          90
+        ]
+      },
+      "daily_balanced": {
+        "detail_interval_seconds": [
+          8,
+          12
+        ],
+        "batch_size": 12,
+        "batch_pause_seconds": [
+          90,
+          120
+        ]
+      },
+      "large_safer": {
+        "detail_interval_seconds": [
+          12,
+          18
+        ],
+        "batch_size": 10,
+        "batch_pause_seconds": [
+          120,
+          180
+        ],
+        "default": true
+      },
+      "conservative_safest": {
+        "detail_interval_seconds": [
+          18,
+          25
+        ],
+        "batch_size": 8,
+        "batch_pause_seconds": [
+          180,
+          300
+        ]
+      }
+    }
   },
   "ui": {
     "layout": "Desktop-first single-page workspace",
@@ -138,14 +189,16 @@
       "sync selected"
     ],
     "archive_filter_default": "all",
-    "directory_flow": "remote ready -> choose provider archive root -> detect layout; v1 offers explicit local-only upgrade; v2 auto read-only scan/Plan; manual Rescan local available",
+    "directory_flow": "restore last save location when browser permission allows; choose/change directory is the only picker action; re-check scans the current location; sync never opens the directory picker",
     "legacy_space_chooser_primary_entry": false,
     "remote_scope_cache": "persistent Remote Index can render immediately; background head validation; changed head/full-expiry falls back to full refresh; Team remains a separate identity/cache",
-    "archive_summary": "Local N (in projects P / outside projects R) + New / Verify / Synced / Issues; migration state shown separately",
+    "archive_summary": "plain user summary: 已保存 / 已同步 / 待同步 / 需确认 / 异常; technical status breakdown moves to details",
     "header_context": "provider only; scope remains in filter controls and archive directory remains in Local archive card",
-    "run_settings": "network policy and sync-content settings remain visible but are immutable during an active sync; summaries reflect the run-start snapshot",
+    "run_settings": "request-speed preset and attachment choice are visible but immutable during an active sync; advanced numeric pacing is nested under 高级设置",
     "refresh": "normal click = fast newest-window validation; Shift+click = force complete refresh",
-    "preflight_status_visibility": "does not auto-switch to pending; first-stage UNCHANGED / NEW / VERIFY remain directly observable"
+    "preflight_status_visibility": "main UI maps fine-grained internal states to four user states: 已同步 / 待同步 / 需确认 / 异常",
+    "progress": "stable 会话进度 X / Y for actual runtime work; current conversation/sub-task shown separately; transient waits never replace the main progress",
+    "tooltips": "short plain-language hints only where action meaning is not already obvious"
   },
-  "core_literal_sha256": "42b641a3bfc6fdeae085cf9cf55adf8c2e24032384dc25029d75f65a3fb26ca9"
+  "core_literal_sha256": "e7cd280982d450d700fba93a94740d7730c57f376c8105200e2f3f4a07b2c3f5"
 }

@@ -1,3 +1,29 @@
+# ChatHarbor Changelog
+
+## 0.0.14.0 — 2026-09-15
+
+### User-facing UX convergence
+- Reduced the normal sync-status vocabulary to four user states: **已同步 / 待同步 / 需确认 / 异常**. Fine-grained internal states remain available to diagnostics.
+- `LOCAL_UNTRACKED` is now **需确认** and is no longer auto-written by ordinary sync.
+- Added stable `会话进度 X / Y` runtime progress; the current conversation and sub-task are shown separately so scheduler waits no longer hide overall progress.
+- Fast-confirmed items disappear from the runtime progress once the real remote-processing phase begins and return only in the final summary.
+- Simplified normal UI language and reduced repetitive row noise (`无项目` / `未归档`).
+
+### Directory workflow
+- Separated directory responsibilities: choose/change location, re-check current location, and sync selected are independent actions.
+- `同步选中` no longer opens the system directory picker.
+- Added IndexedDB persistence for the last FileSystemDirectoryHandle and automatic restore when browser permission remains available.
+
+### Safer request strategy
+- Replaced ambiguous speed labels with use-case presets: **少量任务（较快） / 日常使用（平衡） / 大量任务（更稳） / 保守模式（最稳）**.
+- New default: 12–18s conversation-detail interval, 10 conversations/batch, 120–180s batch break.
+- Attachment metadata now uses 3–5s cadence plus a 30–60s break every 10 metadata requests.
+- HTTP 429 cooldown increased to 5 minutes for the first retry and 10 minutes for the second. Each observed 429 also slows detail/attachment lanes by 50% for the current page, capped conservatively.
+- Advanced numeric batch/pause controls remain available under **高级设置**; the normal preset selector applies the complete preset.
+
+### Preserved
+- Archive Layout v2, Manifest authority, content-signature verification, progressive cloud discovery, lane-aware scheduler, typed HTTP retry, missing-only attachment backfill, commit-accurate state, pause/resume/cancel and tracked-only cleanup remain intact.
+
 ## 0.0.13.1 — 2026-09-15
 
 - Classified 429, 5xx, 401/403, 404 and transport failures separately.
@@ -20,8 +46,6 @@
 
 ### Preserved
 - Layout v2, LOCAL_ONLY safety, convergent remote-list checkpoints, persistent Remote Index cache/fast-head refresh, missing-only attachment backfill, monotonic attachment progress, pause/resume/cancel and clean-lineage upstream pinning remain in force.
-
-# ChatHarbor Changelog
 
 ## 0.0.11.4 — 2026-09-15
 

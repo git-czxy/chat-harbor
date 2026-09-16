@@ -4,7 +4,7 @@ const assert = require('assert');
 const { webcrypto } = require('crypto');
 global.crypto = webcrypto;
 global.document = { getElementById:()=>null, addEventListener:()=>{}, hidden:false };
-global.window = { addEventListener:()=>{} };
+global.window = { addEventListener:()=>{}, fetch: async()=>({ok:true,status:200}) };
 global.localStorage = { getItem:()=>null, setItem:()=>{} };
 const sleep = async()=>{};
 const jitter = ()=>0;

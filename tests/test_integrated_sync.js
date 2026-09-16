@@ -3,7 +3,7 @@ const assert = require('assert');
 const { webcrypto } = require('crypto');
 global.crypto = webcrypto;
 global.document={getElementById:()=>null,addEventListener:()=>{},hidden:false};
-global.window={addEventListener:()=>{}};
+global.window={addEventListener:()=>{},fetch:async()=>({ok:true,status:200})};
 global.localStorage={getItem:()=>null,setItem:()=>{}};
 const CH_SIGNATURE_VERSION = 'sha256-current_node+mapping-v1';
 
@@ -290,7 +290,7 @@ chShowIntegratedSyncReport = ()=>{};
   // Full sync refuses an incomplete remote universe before any disk scan/write.
   await assert.rejects(
     ()=>chRunIntegratedDirectorySync({rootHandle:{},remoteList:[],selectedIds:null,remoteUniverseComplete:false}),
-    /完整远端列表/
+    /云端对话列表还没有加载完整/
   );
 
   // Streaming sync must classify and commit each fetched conversation before fetching the next one.
