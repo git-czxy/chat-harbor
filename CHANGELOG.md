@@ -1,5 +1,40 @@
 # ChatHarbor Changelog
 
+## 0.0.11.0 — 2026-09-14
+
+### Fixed — incremental convergence
+- Fixed the repeated-verification loop caused by comparing remote-list metadata against Manifest facts written primarily from the detail endpoint.
+- Added dedicated `remote_list_*` observation fields and `remote_observed_at`; cheap preflight comparison now uses the same source semantics it persists.
+- Added `OBSERVATION_ONLY`: a successful unchanged detail verification can advance the Manifest checkpoint without rewriting JSON/Markdown or pretending content was re-synced.
+- Preserved `synced_at` as the last content/file commit timestamp during observation-only and metadata-only Manifest commits.
+- Refined timestamp comparison to distinguish `same`, `different`, and `unknown` rather than treating every missing time as an ordinary difference.
+- Remote merge now preserves archive/project ambiguity as `unknown` instead of collapsing conflicting known values.
+
+### Changed — Manifest-first local planning
+- Normal local scan now treats `ChatHarbor_manifest.json` as the primary local index. Manifest-tracked JSON is fast-checked by path/size instead of reparsed.
+- Filesystem enumeration remains in place to discover untracked JSON and duplicate identities; missing/mismatched tracked files remain blocking errors.
+
+### Added — attachment completeness
+- Added independent attachment states: `unknown`, `none`, `complete`, `partial`, `not_downloaded`.
+- Default no-download mode does not create attachment verification work.
+- When attachment download is requested, incomplete/unknown records can enter `ATTACHMENT_BACKFILL` without being falsely classified as content updates.
+
+### Added — persistent Remote Index cache
+- Added IndexedDB-backed provider/account Remote Index cache for immediate reopening without blocking on a full list fetch.
+- Fast refresh checks a 20-item newest window per list source. A stable head reuses the previous complete tail; any changed head falls back to a full refresh.
+- Full refresh is forced at least every 24 hours. Sync requires a complete snapshot validated within 2 minutes or refreshes before starting.
+- Normal `刷新` uses fast validation; Shift+`刷新` forces a complete refresh.
+- Persistent cache reuse is disabled when account/workspace identity is ambiguous.
+
+### UI / planning
+- Preflight no longer forces the status filter to `待处理`; the first-stage result can visibly retain `已同步 / 新增 / 待核验` states.
+- Toggling attachment download reruns preflight so attachment backfill candidates become visible before execution.
+
+### Safety
+- Remote cache remains disposable acceleration data and is not archive authority.
+- Partial/head-only discovery cannot independently establish `LOCAL_ONLY`; absence decisions still require a complete remote universe.
+- Existing streaming atomic commit, conservative request pacing, run-state locking, Layout v2 migration and tracked-only cleanup invariants remain in force.
+
 ## 0.0.10.1 — 2026-09-14
 
 ### Changed

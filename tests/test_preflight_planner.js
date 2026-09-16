@@ -61,9 +61,9 @@ const plan = chBuildPreflightPlan(remote, localScan);
 assert.deepStrictEqual(plan.summary, {
   remote:9, remoteUnique:8, scopeRemote:8, local:7,
   newCount:1, remoteUpdateCandidateCount:2, renameCandidateCount:2,
-  unchangedCount:1, metadataCandidateCount:0, rawOnlyVerifyCount:1, localOnlyCount:1, localOnlyReliable:true, remoteUniverseComplete:true, remoteUniverseNote:null, duplicateIdCount:2,
+  unchangedCount:1, metadataCandidateCount:0, attachmentCandidateCount:0, rawOnlyVerifyCount:1, localOnlyCount:1, localOnlyReliable:true, remoteUniverseComplete:true, remoteUniverseNote:null, duplicateIdCount:2,
   errorCount:0, maximumFetchRequired:5,
-  manifestTracked:5, localProjectCount:0, localRootCount:0, archiveLayoutVersion:2, provider:'chatgpt', migrationRequired:false, rawConversationFiles:8, rawOnlyIds:1
+  manifestTracked:5, localProjectCount:0, localRootCount:0, archiveLayoutVersion:2, provider:'chatgpt', migrationRequired:false, rawConversationFiles:8, rawOnlyIds:1, trackedFastChecked:0
 });
 assert.strictEqual(plan.items.find(x=>x.id==='A').action,'UNCHANGED');
 assert.strictEqual(plan.items.find(x=>x.id==='B').action,'VERIFY_RENAMED');
@@ -112,7 +112,7 @@ assert(metadataPlan.items[0].reasons.includes('ARCHIVE_STATE_DIFF'));
 // Fake File System Access API handles for archive scanner tests.
 class FakeFile {
   constructor(text){ this.kind='file'; this._text=text; }
-  async getFile(){ return { text: async()=>this._text }; }
+  async getFile(){ return { text: async()=>this._text, size: Buffer.byteLength(this._text) }; }
 }
 class FakeDir {
   constructor(entries={}){ this.kind='directory'; this._entries=new Map(Object.entries(entries)); }
@@ -152,10 +152,11 @@ const root = new FakeDir({
   assert.strictEqual(scan.manifestReadable,true);
   assert.strictEqual(scan.stats.local,4); // A,B,H,I
   assert.strictEqual(scan.stats.manifestTracked,2);
-  assert.strictEqual(scan.stats.rawConversationFiles,4); // A,H,H,I
-  assert.strictEqual(scan.stats.rawUniqueIds,3); // A,H,I
+  assert.strictEqual(scan.stats.rawConversationFiles,3); // H,H,I; tracked A is not reparsed
+  assert.strictEqual(scan.stats.rawUniqueIds,2); // H,I
   assert.strictEqual(scan.stats.rawOnlyIds,1); // I only; H is duplicate
   assert.strictEqual(scan.stats.ignoredJsonFiles,2); // misc + broken
+  assert.strictEqual(scan.stats.trackedFastChecked,1); // A checked by path/size without JSON.parse
   assert.strictEqual(scan.stats.skippedAssetDirs,1);
   assert.deepStrictEqual(scan.duplicates.map(x=>x.id),['H']);
   assert(scan.blockedIds.has('H'));

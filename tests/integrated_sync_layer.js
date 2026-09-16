@@ -6,7 +6,7 @@
     // - direct directory writing
     // - conversation_id as canonical archive identity
     // - per-conversation manifest commits
-    // - content signature recording (not yet used for classification)
+    // - content signature recording used by the integrated version-aware classifier
     // - visible progress feedback in the existing picker
     //
     // Integrated Sync preserves the validated Gate 3 / 3.1 writer invariants while routing
@@ -21,6 +21,12 @@
     const CH_ARCHIVE_LAYOUT_VERSION = 2;
     const CH_LAYOUT_CONVERSATIONS_DIR = 'conversations';
     const CH_LAYOUT_PROJECTS_DIR = 'projects';
+    const CH_REMOTE_CACHE_DB = 'chatharbor-remote-index-v1';
+    const CH_REMOTE_CACHE_STORE = 'snapshots';
+    const CH_REMOTE_CACHE_SCHEMA = 1;
+    const CH_REMOTE_HEAD_LIMIT = 20;
+    const CH_REMOTE_FULL_REFRESH_MS = 24 * 60 * 60 * 1000;
+    const CH_REMOTE_SYNC_FRESH_MS = 2 * 60 * 1000;
 
 
     // ======================== ChatHarbor Conservative Network Policy ========================
@@ -808,14 +814,30 @@
                 source_sandbox_path: file.source_sandbox_path || null
             }));
 
+        const observed = chRemoteObservation(entry, existingRecord);
+        const inspectedAttachments = chInspectAttachmentCompleteness(convData, {
+            ...(existingRecord || {}),
+            assets,
+            attachment_failed: preserveExistingAssets ? (existingRecord?.attachment_failed ?? 0) : (attachmentResult?.failures?.length || 0)
+        });
+        const attachmentDetected = includeAttachments
+            ? (attachmentResult?.detected ?? inspectedAttachments.detected)
+            : inspectedAttachments.detected;
+        const attachmentDownloaded = includeAttachments ? assets.length : (preserveExistingAssets ? (existingRecord?.attachment_downloaded ?? assets.length) : 0);
+        const attachmentFailed = includeAttachments ? (attachmentResult?.failures?.length || 0) : (preserveExistingAssets ? (existingRecord?.attachment_failed ?? 0) : 0);
+        const attachmentState = includeAttachments
+            ? (attachmentDetected === 0 ? 'none' : (attachmentFailed === 0 && attachmentDownloaded >= attachmentDetected ? 'complete' : 'partial'))
+            : inspectedAttachments.state;
+
         return {
             conversation_id: conversationId,
             title,
             create_time: convData?.create_time ?? entry?.create_time ?? null,
             remote_update_time: convData?.update_time ?? entry?.update_time ?? null,
-            is_archived: convData?.is_archived ?? entry?.is_archived ?? false,
-            project_id: entry?.projectId || null,
-            project_title: entry?.projectTitle || null,
+            is_archived: observed.remote_list_is_archived ?? convData?.is_archived ?? entry?.is_archived ?? false,
+            project_id: observed.remote_list_project_id ?? null,
+            project_title: observed.remote_list_project_title ?? null,
+            ...observed,
             provider: CH_PROVIDER,
             archive_layout_version: CH_ARCHIVE_LAYOUT_VERSION,
             content_signature: contentSignature,
@@ -826,18 +848,12 @@
             markdown_bytes: chExpectedByteLength(markdownText),
             asset_dir: assetDir,
             assets,
-            attachment_detected: preserveExistingAssets
-                ? (existingRecord.attachment_detected ?? assets.length)
-                : (attachmentResult?.detected || 0),
-            attachment_downloaded: preserveExistingAssets
-                ? (existingRecord.attachment_downloaded ?? assets.length)
-                : assets.length,
-            attachment_failed: preserveExistingAssets
-                ? (existingRecord.attachment_failed ?? 0)
-                : (attachmentResult?.failures?.length || 0),
-            attachment_failures: preserveExistingAssets
-                ? (existingRecord.attachment_failures || [])
-                : (attachmentResult?.failures || []),
+            attachment_state: attachmentState,
+            attachments_checked_at: new Date().toISOString(),
+            attachment_detected: attachmentDetected,
+            attachment_downloaded: attachmentDownloaded,
+            attachment_failed: attachmentFailed,
+            attachment_failures: preserveExistingAssets ? (existingRecord?.attachment_failures || []) : (attachmentResult?.failures || []),
             attachments_preserved_without_download: Boolean(preserveExistingAssets),
             synced_at: syncedAt
         };
@@ -996,6 +1012,100 @@
         return id ? String(id) : '';
     }
 
+    function chTimeRelation(a, b) {
+        const aa = normalizeEpochSeconds(a);
+        const bb = normalizeEpochSeconds(b);
+        if (!aa || !bb) return 'unknown';
+        return Math.abs(aa - bb) <= 0.001 ? 'same' : 'different';
+    }
+
+    function chTimeEquivalent(a, b) {
+        return chTimeRelation(a, b) === 'same';
+    }
+
+    function chRecordListTitle(record) {
+        return Object.prototype.hasOwnProperty.call(record || {}, 'remote_list_title')
+            ? String(record?.remote_list_title ?? '')
+            : String(record?.title ?? '');
+    }
+
+    function chRecordListUpdateTime(record) {
+        return Object.prototype.hasOwnProperty.call(record || {}, 'remote_list_update_time')
+            ? record?.remote_list_update_time
+            : record?.remote_update_time;
+    }
+
+    function chRecordListArchiveState(record) {
+        return Object.prototype.hasOwnProperty.call(record || {}, 'remote_list_is_archived')
+            ? record?.remote_list_is_archived
+            : (Object.prototype.hasOwnProperty.call(record || {}, 'is_archived') ? Boolean(record?.is_archived) : null);
+    }
+
+    function chRecordListProjectId(record) {
+        return Object.prototype.hasOwnProperty.call(record || {}, 'remote_list_project_id')
+            ? record?.remote_list_project_id
+            : (Object.prototype.hasOwnProperty.call(record || {}, 'project_id') ? record?.project_id : null);
+    }
+
+    function chRecordListProjectTitle(record) {
+        return Object.prototype.hasOwnProperty.call(record || {}, 'remote_list_project_title')
+            ? record?.remote_list_project_title
+            : (Object.prototype.hasOwnProperty.call(record || {}, 'project_title') ? record?.project_title : null);
+    }
+
+    function chRemoteObservation(entry, existingRecord = null) {
+        const existing = existingRecord || {};
+        const projectState = entry?.__chProjectState || ((entry?.projectId || entry?.projectTitle) ? 'known' : 'unknown');
+        const archiveState = entry?.__chArchiveState || (Object.prototype.hasOwnProperty.call(entry || {}, 'is_archived') ? 'known' : 'unknown');
+        return {
+            remote_list_title: String(entry?.title ?? chRecordListTitle(existing)),
+            remote_list_update_time: normalizeEpochSeconds(entry?.update_time || 0) || null,
+            remote_list_is_archived: archiveState === 'unknown'
+                ? chRecordListArchiveState(existing)
+                : Boolean(entry?.is_archived),
+            remote_list_project_id: projectState === 'unknown'
+                ? chRecordListProjectId(existing)
+                : (entry?.projectId ?? null),
+            remote_list_project_title: projectState === 'unknown'
+                ? chRecordListProjectTitle(existing)
+                : (entry?.projectTitle ?? null),
+            remote_observed_at: new Date().toISOString()
+        };
+    }
+
+    function chRecordAttachmentState(record) {
+        const value = String(record?.attachment_state || '').toLowerCase();
+        if (['unknown','none','complete','partial','not_downloaded'].includes(value)) return value;
+        return 'unknown';
+    }
+
+    function chAttachmentReferenceKey(ref) {
+        if (!ref) return '';
+        if (ref.kind === 'sandbox') return `sandbox:${ref.messageId || ''}:${ref.sandboxPath || ''}`;
+        return `file:${ref.fileId || ''}`;
+    }
+
+    function chAssetReferenceKey(asset) {
+        if (!asset) return '';
+        if (asset.kind === 'sandbox') return `sandbox:${asset.message_id || ''}:${asset.source_sandbox_path || ''}`;
+        return `file:${asset.source_file_id || ''}`;
+    }
+
+    function chInspectAttachmentCompleteness(convData, record = null) {
+        const refs = collectVisibleAttachments(convData || {});
+        if (refs.length === 0) return { state: 'none', detected: 0, missing: 0 };
+        const assets = Array.isArray(record?.assets) ? record.assets : [];
+        const assetKeys = new Set(assets.map(chAssetReferenceKey).filter(Boolean));
+        const refKeys = refs.map(chAttachmentReferenceKey).filter(Boolean);
+        const missing = refKeys.filter(key => !assetKeys.has(key)).length;
+        const failed = Number(record?.attachment_failed || 0);
+        if (record && missing === 0 && failed === 0 && refKeys.length > 0) {
+            return { state: 'complete', detected: refs.length, missing: 0 };
+        }
+        if (!record || assets.length === 0) return { state: 'not_downloaded', detected: refs.length, missing: refs.length };
+        return { state: 'partial', detected: refs.length, missing };
+    }
+
     async function chCollectPreflightRemoteUniverse(mode, workspaceId, currentList) {
         const base = Array.isArray(currentList) ? currentList.slice() : [];
         try {
@@ -1071,6 +1181,21 @@
         }
     }
 
+    async function chRelativeFileMeta(rootHandle, relativePath) {
+        const parts = chSplitPath(relativePath);
+        if (!parts.length) return { exists: false, size: null };
+        try {
+            let dir = rootHandle;
+            for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i]);
+            const handle = await dir.getFileHandle(parts[parts.length - 1]);
+            const file = await handle.getFile();
+            return { exists: true, size: Number.isFinite(file?.size) ? file.size : null };
+        } catch (err) {
+            if (err?.name === 'NotFoundError') return { exists: false, size: null };
+            throw err;
+        }
+    }
+
     async function chScanLocalArchiveReadOnly(rootHandle, onProgress = null) {
         if (!rootHandle) throw new Error('Directory handle is required');
 
@@ -1083,462 +1208,189 @@
         let conversationJsonFiles = 0;
         let ignoredJsonFiles = 0;
         let skippedAssetDirs = 0;
+        let trackedFastChecked = 0;
 
-        if (manifestResult.error) {
-            errors.push({
-                type: 'MANIFEST_ERROR',
-                id: null,
-                path: CH_MANIFEST_NAME,
-                message: manifestResult.error
-            });
-        }
+        if (manifestResult.error) errors.push({ type:'MANIFEST_ERROR', id:null, path:CH_MANIFEST_NAME, message:manifestResult.error });
 
+        const trackedJsonPathToId = new Map();
         if (manifestResult.manifest) {
-            for (const [key, record] of Object.entries(manifestResult.manifest.conversations)) {
+            for (const [key, record] of Object.entries(manifestResult.manifest.conversations || {})) {
                 const id = String(key || '');
-                if (!id) {
-                    errors.push({
-                        type: 'MANIFEST_EMPTY_ID',
-                        id: null,
-                        path: CH_MANIFEST_NAME,
-                        message: 'manifest contains an empty conversation_id key'
-                    });
-                    continue;
-                }
+                if (!id) { errors.push({type:'MANIFEST_EMPTY_ID',id:null,path:CH_MANIFEST_NAME,message:'manifest contains an empty conversation_id key'}); continue; }
                 if (record?.conversation_id && String(record.conversation_id) !== id) {
-                    errors.push({
-                        type: 'MANIFEST_ID_MISMATCH',
-                        id,
-                        path: CH_MANIFEST_NAME,
-                        message: `record conversation_id ${record.conversation_id} does not match manifest key`
-                    });
+                    errors.push({type:'MANIFEST_ID_MISMATCH',id,path:CH_MANIFEST_NAME,message:`record conversation_id ${record.conversation_id} does not match manifest key`});
                 }
-                manifestById.set(id, {
-                    ...(record || {}),
-                    conversation_id: id,
-                    tracking: 'manifest'
-                });
+                const normalized = { ...(record || {}), conversation_id:id, tracking:'manifest' };
+                manifestById.set(id, normalized);
+                if (normalized.json_path) trackedJsonPathToId.set(String(normalized.json_path), id);
             }
         }
 
+        const seenTrackedPaths = new Set();
         const walk = async (dirHandle, relativeDir = '') => {
             for await (const [name, handle] of dirHandle.entries()) {
                 const relativePath = chJoinRelativePath(relativeDir, name);
                 if (handle.kind === 'directory') {
-                    if (/_files$/i.test(name)) {
-                        skippedAssetDirs++;
-                        continue;
-                    }
+                    if (/_files$/i.test(name)) { skippedAssetDirs++; continue; }
                     await walk(handle, relativePath);
                     continue;
                 }
                 if (!/\.json$/i.test(name) || name === CH_MANIFEST_NAME) continue;
-
                 jsonFilesSeen++;
-                if (onProgress && jsonFilesSeen % 10 === 0) {
-                    onProgress({ jsonFilesSeen, conversationJsonFiles, path: relativePath });
+                if (onProgress && jsonFilesSeen % 25 === 0) onProgress({jsonFilesSeen,conversationJsonFiles,path:relativePath});
+
+                const trackedId = trackedJsonPathToId.get(relativePath);
+                if (trackedId) {
+                    seenTrackedPaths.add(relativePath);
+                    trackedFastChecked++;
+                    const record = manifestById.get(trackedId);
+                    try {
+                        const file = await handle.getFile();
+                        if (Number(record?.json_bytes || 0) > 0 && Number.isFinite(file?.size) && file.size !== Number(record.json_bytes)) {
+                            errors.push({type:'MANIFEST_JSON_SIZE_MISMATCH',id:trackedId,path:relativePath,message:`tracked JSON size ${file.size} != manifest ${record.json_bytes}`});
+                        }
+                    } catch (err) {
+                        errors.push({type:'MANIFEST_JSON_STAT_FAILED',id:trackedId,path:relativePath,message:err?.message || String(err)});
+                    }
+                    continue;
                 }
 
                 let data;
-                try {
-                    data = await chReadJsonHandle(handle);
-                } catch (_) {
-                    // A .json attachment outside a conventional *_files directory may not be a
-                    // ChatGPT conversation. Do not treat parse failure as archive corruption here.
-                    ignoredJsonFiles++;
-                    continue;
-                }
-
-                if (!chLooksLikeConversationJson(data)) {
-                    ignoredJsonFiles++;
-                    continue;
-                }
-
+                try { data = await chReadJsonHandle(handle); }
+                catch (_) { ignoredJsonFiles++; continue; }
+                if (!chLooksLikeConversationJson(data)) { ignoredJsonFiles++; continue; }
                 const id = String(data.conversation_id || data.id || '');
-                if (!id) {
-                    errors.push({
-                        type: 'RAW_CONVERSATION_ID_MISSING',
-                        id: null,
-                        path: relativePath,
-                        message: 'conversation-shaped JSON has no conversation_id'
-                    });
-                    continue;
-                }
-
+                if (!id) { errors.push({type:'RAW_CONVERSATION_ID_MISSING',id:null,path:relativePath,message:'conversation-shaped JSON has no conversation_id'}); continue; }
                 conversationJsonFiles++;
                 const rawRecord = {
-                    conversation_id: id,
-                    title: data.title || '',
-                    create_time: data.create_time ?? null,
-                    remote_update_time: data.update_time ?? null,
-                    is_archived: data.is_archived ?? false,
-                    json_path: relativePath,
-                    tracking: 'raw_only'
+                    conversation_id:id,title:data.title||'',create_time:data.create_time??null,
+                    remote_update_time:data.update_time??null,is_archived:data.is_archived??false,
+                    json_path:relativePath,tracking:'raw_only'
                 };
-                if (!rawById.has(id)) rawById.set(id, []);
-                rawById.get(id).push(rawRecord);
-                rawByPath.set(relativePath, rawRecord);
+                if (!rawById.has(id)) rawById.set(id,[]);
+                rawById.get(id).push(rawRecord); rawByPath.set(relativePath,rawRecord);
             }
         };
+        await walk(rootHandle,'');
 
-        await walk(rootHandle, '');
-
-        const duplicateIds = new Set();
-        const duplicates = [];
-        for (const [id, records] of rawById.entries()) {
-            if (records.length > 1) {
-                duplicateIds.add(id);
-                duplicates.push({
-                    id,
-                    source: 'local',
-                    paths: records.map(record => record.json_path)
-                });
+        const blockedIds = new Set();
+        for (const [id, record] of manifestById.entries()) {
+            const trackedPath = String(record?.json_path || '');
+            if (!trackedPath) { errors.push({type:'MANIFEST_JSON_PATH_MISSING',id,path:CH_MANIFEST_NAME,message:'tracked conversation has no json_path'}); blockedIds.add(id); continue; }
+            if (!seenTrackedPaths.has(trackedPath)) { errors.push({type:'MANIFEST_JSON_NOT_FOUND',id,path:trackedPath,message:'manifest json_path was not found during archive scan'}); blockedIds.add(id); }
+            if (record?.markdown_path) {
+                const meta = await chRelativeFileMeta(rootHandle, record.markdown_path);
+                if (!meta.exists) { errors.push({type:'MANIFEST_MARKDOWN_NOT_FOUND',id,path:record.markdown_path,message:'manifest markdown_path was not found during archive scan'}); blockedIds.add(id); }
+                else if (Number(record?.markdown_bytes || 0)>0 && meta.size != null && meta.size !== Number(record.markdown_bytes)) {
+                    errors.push({type:'MANIFEST_MARKDOWN_SIZE_MISMATCH',id,path:record.markdown_path,message:`tracked Markdown size ${meta.size} != manifest ${record.markdown_bytes}`});
+                }
             }
         }
 
-        const blockedIds = new Set();
-        const recordsById = new Map();
-        const allIds = new Set([...manifestById.keys(), ...rawById.keys()]);
+        const duplicateIds = new Set(); const duplicates=[];
+        for (const [id, records] of rawById.entries()) if (records.length>1) { duplicateIds.add(id); duplicates.push({id,source:'local',paths:records.map(r=>r.json_path)}); blockedIds.add(id); }
 
-        for (const id of allIds) {
-            const manifestRecord = manifestById.get(id) || null;
-            const rawRecords = rawById.get(id) || [];
-
-            if (duplicateIds.has(id)) {
-                blockedIds.add(id);
+        // A raw untracked copy with the same identity as a manifest-tracked conversation is not
+        // silently adopted. Preserve it and block that identity until the duplicate is resolved.
+        for (const [id, records] of rawById.entries()) {
+            if (manifestById.has(id) && records.length) {
+                duplicateIds.add(id); blockedIds.add(id);
+                duplicates.push({id,source:'local-manifest+untracked',paths:[manifestById.get(id)?.json_path,...records.map(r=>r.json_path)].filter(Boolean)});
             }
+        }
 
-            if (manifestRecord) {
-                const trackedPath = String(manifestRecord.json_path || '');
-                if (!trackedPath) {
-                    errors.push({
-                        type: 'MANIFEST_JSON_PATH_MISSING',
-                        id,
-                        path: CH_MANIFEST_NAME,
-                        message: 'tracked conversation has no json_path'
-                    });
-                    blockedIds.add(id);
-                } else {
-                    const rawAtTrackedPath = rawByPath.get(trackedPath);
-                    if (!rawAtTrackedPath) {
-                        errors.push({
-                            type: 'MANIFEST_JSON_NOT_FOUND',
-                            id,
-                            path: trackedPath,
-                            message: 'manifest json_path was not found during archive scan'
-                        });
-                        blockedIds.add(id);
-                    } else if (rawAtTrackedPath.conversation_id !== id) {
-                        errors.push({
-                            type: 'MANIFEST_JSON_ID_MISMATCH',
-                            id,
-                            path: trackedPath,
-                            message: `tracked JSON belongs to ${rawAtTrackedPath.conversation_id}`
-                        });
-                        blockedIds.add(id);
-                    }
-                }
-                recordsById.set(id, manifestRecord);
-            } else if (rawRecords.length === 1) {
-                recordsById.set(id, rawRecords[0]);
-            } else if (rawRecords.length > 1) {
-                // Keep identity visible for counts, but do not choose one duplicate as canonical.
-                recordsById.set(id, {
-                    conversation_id: id,
-                    title: rawRecords[0]?.title || '',
-                    remote_update_time: rawRecords[0]?.remote_update_time ?? null,
-                    tracking: 'duplicate_raw'
-                });
-            }
+        const recordsById = new Map(manifestById);
+        for (const [id, records] of rawById.entries()) {
+            if (manifestById.has(id)) continue;
+            if (records.length===1) recordsById.set(id,records[0]);
+            else if (records.length>1) recordsById.set(id,{conversation_id:id,title:records[0]?.title||'',remote_update_time:records[0]?.remote_update_time??null,tracking:'duplicate_raw'});
         }
 
         const errorsById = new Map();
-        for (const error of errors) {
-            if (!error.id) continue;
-            if (!errorsById.has(error.id)) errorsById.set(error.id, []);
-            errorsById.get(error.id).push(error);
-        }
-
-        if (onProgress) {
-            onProgress({ jsonFilesSeen, conversationJsonFiles, done: true });
-        }
+        for (const error of errors) { if (!error.id) continue; if (!errorsById.has(error.id)) errorsById.set(error.id,[]); errorsById.get(error.id).push(error); }
+        for (const error of errors) if (error.id && /_NOT_FOUND|_SIZE_MISMATCH|_STAT_FAILED|_PATH_MISSING|_ID_MISMATCH/.test(error.type)) blockedIds.add(error.id);
+        if (onProgress) onProgress({jsonFilesSeen,conversationJsonFiles,done:true});
 
         return {
-            manifestExists: manifestResult.exists,
-            manifestReadable: Boolean(manifestResult.manifest),
-            manifest: manifestResult.manifest,
-            recordsById,
-            manifestById,
-            rawById,
-            duplicateIds,
-            duplicates,
-            blockedIds,
-            errors,
-            errorsById,
-            stats: {
-                local: recordsById.size,
-                manifestTracked: manifestById.size,
-                manifestProject: Array.from(manifestById.values()).filter(record => record.project_id || record.project_title).length,
-                manifestRoot: Array.from(manifestById.values()).filter(record => !(record.project_id || record.project_title)).length,
-                rawConversationFiles: conversationJsonFiles,
-                rawUniqueIds: rawById.size,
-                rawOnlyIds: Array.from(recordsById.values()).filter(record => record.tracking === 'raw_only').length,
-                archiveLayoutVersion: manifestResult.manifest ? chManifestLayoutVersion(manifestResult.manifest) : CH_ARCHIVE_LAYOUT_VERSION,
-                provider: manifestResult.manifest ? (chManifestProvider(manifestResult.manifest) || CH_PROVIDER) : CH_PROVIDER,
-                migrationRequired: Boolean(manifestResult.manifest && chManifestRequiresLayoutMigration(manifestResult.manifest)),
-                jsonFilesSeen,
-                ignoredJsonFiles,
-                skippedAssetDirs
+            manifestExists:manifestResult.exists, manifestReadable:Boolean(manifestResult.manifest), manifest:manifestResult.manifest,
+            recordsById,manifestById,rawById,duplicateIds,duplicates,blockedIds,errors,errorsById,
+            stats:{
+                local:recordsById.size,manifestTracked:manifestById.size,
+                manifestProject:Array.from(manifestById.values()).filter(r=>r.project_id||r.project_title).length,
+                manifestRoot:Array.from(manifestById.values()).filter(r=>!(r.project_id||r.project_title)).length,
+                rawConversationFiles:conversationJsonFiles,rawUniqueIds:rawById.size,
+                rawOnlyIds:Array.from(recordsById.values()).filter(r=>r.tracking==='raw_only').length,
+                archiveLayoutVersion:manifestResult.manifest?chManifestLayoutVersion(manifestResult.manifest):CH_ARCHIVE_LAYOUT_VERSION,
+                provider:manifestResult.manifest?(chManifestProvider(manifestResult.manifest)||CH_PROVIDER):CH_PROVIDER,
+                migrationRequired:Boolean(manifestResult.manifest&&chManifestRequiresLayoutMigration(manifestResult.manifest)),
+                jsonFilesSeen,ignoredJsonFiles,skippedAssetDirs,trackedFastChecked
             }
         };
-    }
-
-    function chTimeEquivalent(a, b) {
-        const aa = normalizeEpochSeconds(a);
-        const bb = normalizeEpochSeconds(b);
-        if (!aa || !bb) return false;
-        return Math.abs(aa - bb) <= 0.001;
     }
 
     function chBuildPreflightPlan(remoteList, localScan, selectedIds = null, options = {}) {
         const allRemote = Array.isArray(remoteList) ? remoteList : [];
         const remoteUniverseComplete = options.remoteUniverseComplete !== false;
         const remoteUniverseNote = options.remoteUniverseNote || null;
-        const selected = selectedIds instanceof Set && selectedIds.size > 0
-            ? selectedIds
-            : null;
+        const includeAttachments = Boolean(options.includeAttachments);
+        const selected = selectedIds instanceof Set && selectedIds.size > 0 ? selectedIds : null;
 
-        const remoteById = new Map();
-        const remoteErrors = [];
+        const remoteById = new Map(); const remoteErrors=[];
         for (const entry of allRemote) {
-            const id = chRemoteConversationId(entry);
-            if (!id) {
-                remoteErrors.push({
-                    type: 'REMOTE_ID_MISSING',
-                    id: null,
-                    title: entry?.title || '',
-                    message: 'remote list entry has no conversation_id'
-                });
-                continue;
-            }
-            if (!remoteById.has(id)) remoteById.set(id, []);
-            remoteById.get(id).push(entry);
+            const id=chRemoteConversationId(entry);
+            if(!id){remoteErrors.push({type:'REMOTE_ID_MISSING',id:null,title:entry?.title||'',message:'remote list entry has no conversation_id'});continue;}
+            if(!remoteById.has(id))remoteById.set(id,[]); remoteById.get(id).push(entry);
         }
+        const remoteDuplicateIds=new Set(),remoteDuplicates=[];
+        for(const [id,entries] of remoteById.entries()) if(entries.length>1){remoteDuplicateIds.add(id);remoteDuplicates.push({id,source:'remote',count:entries.length,titles:entries.map(e=>e?.title||'')});}
+        const duplicateIds=new Set([...localScan.duplicateIds,...remoteDuplicateIds]);
+        const globalRemoteIds=new Set(remoteById.keys());
+        const scopeIds=selected?new Set(Array.from(selected).filter(id=>globalRemoteIds.has(id))):new Set(globalRemoteIds);
 
-        const remoteDuplicateIds = new Set();
-        const remoteDuplicates = [];
-        for (const [id, entries] of remoteById.entries()) {
-            if (entries.length > 1) {
-                remoteDuplicateIds.add(id);
-                remoteDuplicates.push({
-                    id,
-                    source: 'remote',
-                    count: entries.length,
-                    titles: entries.map(entry => entry?.title || '')
-                });
-            }
-        }
-
-        const duplicateIds = new Set([
-            ...localScan.duplicateIds,
-            ...remoteDuplicateIds
-        ]);
-
-        const globalRemoteIds = new Set(remoteById.keys());
-        const scopeIds = selected
-            ? new Set(Array.from(selected).filter(id => globalRemoteIds.has(id)))
-            : new Set(globalRemoteIds);
-
-        const items = [];
-        let newCount = 0;
-        let remoteUpdateCandidateCount = 0;
-        let renameCandidateCount = 0;
-        let unchangedCount = 0;
-        let metadataCandidateCount = 0;
-        let rawOnlyVerifyCount = 0;
-        let errorCount = 0;
-        let maximumFetchRequired = 0;
-
-        for (const id of scopeIds) {
-            const remoteEntries = remoteById.get(id) || [];
-            const remote = remoteEntries[0] || null;
-            const local = localScan.recordsById.get(id) || null;
-
-            if (duplicateIds.has(id)) {
-                items.push({
-                    id,
-                    action: 'DUPLICATE',
-                    remote,
-                    local,
-                    needs_detail_fetch: false,
-                    reasons: [
-                        ...(remoteDuplicateIds.has(id) ? ['REMOTE_DUPLICATE_ID'] : []),
-                        ...(localScan.duplicateIds.has(id) ? ['LOCAL_DUPLICATE_ID'] : [])
-                    ]
-                });
-                continue;
+        const items=[]; let newCount=0,remoteUpdateCandidateCount=0,renameCandidateCount=0,unchangedCount=0,metadataCandidateCount=0,rawOnlyVerifyCount=0,errorCount=0,maximumFetchRequired=0,attachmentCandidateCount=0;
+        for(const id of scopeIds){
+            const remoteEntries=remoteById.get(id)||[]; const remote=remoteEntries[0]||null; const local=localScan.recordsById.get(id)||null;
+            if(duplicateIds.has(id)){items.push({id,action:'DUPLICATE',remote,local,needs_detail_fetch:false,reasons:[...(remoteDuplicateIds.has(id)?['REMOTE_DUPLICATE_ID']:[]),...(localScan.duplicateIds.has(id)?['LOCAL_DUPLICATE_ID']:[])]});continue;}
+            if(localScan.blockedIds.has(id)){errorCount++;items.push({id,action:'ERROR',remote,local,needs_detail_fetch:false,reasons:(localScan.errorsById.get(id)||[]).map(e=>e.type)});continue;}
+            if(!local){newCount++;maximumFetchRequired++;items.push({id,action:'NEW',remote,local:null,needs_detail_fetch:true,remote_update_candidate:false,rename_candidate:false,metadata_candidate:false,attachment_candidate:includeAttachments,reasons:['NOT_IN_LOCAL_ARCHIVE']});continue;}
+            if(local.tracking!=='manifest'){
+                const timeRelation=chTimeRelation(remote?.update_time,local?.remote_update_time);
+                const updateCandidate=timeRelation!=='same'; const titleChanged=String(remote?.title||'')!==String(local?.title||'');
+                rawOnlyVerifyCount++; if(updateCandidate)remoteUpdateCandidateCount++; if(titleChanged)renameCandidateCount++; maximumFetchRequired++;
+                items.push({id,action:'VERIFY_CHANGED',remote,local,needs_detail_fetch:true,remote_update_candidate:updateCandidate,rename_candidate:titleChanged,metadata_candidate:false,attachment_candidate:includeAttachments,reasons:['LOCAL_RAW_NOT_MANIFEST_TRACKED',...(timeRelation==='different'?['REMOTE_UPDATE_TIME_DIFF']:timeRelation==='unknown'?['REMOTE_UPDATE_TIME_UNKNOWN']:[]),...(titleChanged?['TITLE_DIFF']:[])]});continue;
             }
 
-            if (localScan.blockedIds.has(id)) {
-                errorCount++;
-                items.push({
-                    id,
-                    action: 'ERROR',
-                    remote,
-                    local,
-                    needs_detail_fetch: false,
-                    reasons: (localScan.errorsById.get(id) || []).map(error => error.type)
-                });
-                continue;
-            }
+            const baselineTitle=chRecordListTitle(local);
+            const titleChanged=String(remote?.title||'')!==baselineTitle;
+            const timeRelation=chTimeRelation(remote?.update_time,chRecordListUpdateTime(local));
+            const unknownRecentlyVerified = timeRelation==='unknown' && Object.prototype.hasOwnProperty.call(local||{},'remote_list_update_time') && !normalizeEpochSeconds(remote?.update_time||0) && !normalizeEpochSeconds(local?.remote_list_update_time||0) && local?.remote_observed_at && (Date.now()-Date.parse(local.remote_observed_at)) < CH_REMOTE_FULL_REFRESH_MS;
+            const updateCandidate=timeRelation==='different' || (timeRelation==='unknown' && !unknownRecentlyVerified);
+            const metadataReasons=[];
+            const archiveKnown=(remote?.__chArchiveState||'known')!=='unknown';
+            const projectKnown=(remote?.__chProjectState||'known')!=='unknown';
+            if(archiveKnown && Object.prototype.hasOwnProperty.call(remote||{},'is_archived') && Boolean(remote?.is_archived)!==Boolean(chRecordListArchiveState(local))) metadataReasons.push('ARCHIVE_STATE_DIFF');
+            if(projectKnown && String(remote?.projectId??'')!==String(chRecordListProjectId(local)??'')) metadataReasons.push('PROJECT_ID_DIFF');
+            if(projectKnown && String(remote?.projectTitle??'')!==String(chRecordListProjectTitle(local)??'')) metadataReasons.push('PROJECT_TITLE_DIFF');
+            const metadataCandidate=metadataReasons.length>0;
+            const attachmentState=chRecordAttachmentState(local);
+            const attachmentCandidate=includeAttachments && !['complete','none'].includes(attachmentState);
 
-            if (!local) {
-                newCount++;
+            if(updateCandidate)remoteUpdateCandidateCount++; if(titleChanged)renameCandidateCount++; if(metadataCandidate)metadataCandidateCount++; if(attachmentCandidate)attachmentCandidateCount++;
+            if(updateCandidate||titleChanged||metadataCandidate||attachmentCandidate){
                 maximumFetchRequired++;
-                items.push({
-                    id,
-                    action: 'NEW',
-                    remote,
-                    local: null,
-                    needs_detail_fetch: true,
-                    remote_update_candidate: false,
-                    rename_candidate: false,
-                    reasons: ['NOT_IN_LOCAL_ARCHIVE']
-                });
-                continue;
-            }
-
-            if (local.tracking !== 'manifest') {
-                const titleChanged = String(remote?.title || '') !== String(local?.title || '');
-                const updateCandidate = !chTimeEquivalent(remote?.update_time, local?.remote_update_time);
-                rawOnlyVerifyCount++;
-                if (updateCandidate) remoteUpdateCandidateCount++;
-                if (titleChanged) renameCandidateCount++;
-                maximumFetchRequired++;
-                items.push({
-                    id,
-                    action: 'VERIFY_CHANGED',
-                    remote,
-                    local,
-                    needs_detail_fetch: true,
-                    remote_update_candidate: updateCandidate,
-                    rename_candidate: titleChanged,
-                    metadata_candidate: false,
-                    reasons: [
-                        'LOCAL_RAW_NOT_MANIFEST_TRACKED',
-                        ...(updateCandidate ? ['REMOTE_UPDATE_TIME_DIFF_OR_UNKNOWN'] : []),
-                        ...(titleChanged ? ['TITLE_DIFF'] : [])
-                    ]
-                });
-                continue;
-            }
-
-            const titleChanged = String(remote?.title || '') !== String(local?.title || '');
-            const timeEquivalent = chTimeEquivalent(
-                remote?.update_time,
-                local?.remote_update_time
-            );
-            const updateCandidate = !timeEquivalent;
-            const metadataReasons = [];
-            if (Object.prototype.hasOwnProperty.call(remote || {}, 'is_archived') &&
-                Boolean(remote?.is_archived) !== Boolean(local?.is_archived)) {
-                metadataReasons.push('ARCHIVE_STATE_DIFF');
-            }
-            if (Object.prototype.hasOwnProperty.call(remote || {}, 'projectId') &&
-                String(remote?.projectId ?? '') !== String(local?.project_id ?? '')) {
-                metadataReasons.push('PROJECT_ID_DIFF');
-            }
-            if (Object.prototype.hasOwnProperty.call(remote || {}, 'projectTitle') &&
-                String(remote?.projectTitle ?? '') !== String(local?.project_title ?? '')) {
-                metadataReasons.push('PROJECT_TITLE_DIFF');
-            }
-            const metadataCandidate = metadataReasons.length > 0;
-
-            if (updateCandidate) remoteUpdateCandidateCount++;
-            if (titleChanged) renameCandidateCount++;
-            if (metadataCandidate) metadataCandidateCount++;
-
-            if (updateCandidate || titleChanged || metadataCandidate) {
-                maximumFetchRequired++;
-                items.push({
-                    id,
-                    action: updateCandidate || metadataCandidate ? 'VERIFY_CHANGED' : 'VERIFY_RENAMED',
-                    remote,
-                    local,
-                    needs_detail_fetch: true,
-                    remote_update_candidate: updateCandidate,
-                    rename_candidate: titleChanged,
-                    metadata_candidate: metadataCandidate,
-                    reasons: [
-                        ...(updateCandidate ? ['REMOTE_UPDATE_TIME_DIFF_OR_UNKNOWN'] : []),
-                        ...(titleChanged ? ['TITLE_DIFF'] : []),
-                        ...metadataReasons
-                    ]
-                });
-            } else {
-                unchangedCount++;
-                items.push({
-                    id,
-                    action: 'UNCHANGED',
-                    remote,
-                    local,
-                    needs_detail_fetch: false,
-                    remote_update_candidate: false,
-                    rename_candidate: false,
-                    metadata_candidate: false,
-                    reasons: []
-                });
+                items.push({id,action:(updateCandidate||metadataCandidate||attachmentCandidate)?'VERIFY_CHANGED':'VERIFY_RENAMED',remote,local,needs_detail_fetch:true,remote_update_candidate:updateCandidate,rename_candidate:titleChanged,metadata_candidate:metadataCandidate,attachment_candidate:attachmentCandidate,reasons:[...(timeRelation==='different'?['REMOTE_UPDATE_TIME_DIFF']:timeRelation==='unknown'?['REMOTE_UPDATE_TIME_UNKNOWN']:[]),...(titleChanged?['TITLE_DIFF']:[]),...metadataReasons,...(attachmentCandidate?[`ATTACHMENT_${attachmentState.toUpperCase()}`]:[])]});
+            }else{
+                unchangedCount++; items.push({id,action:'UNCHANGED',remote,local,needs_detail_fetch:false,remote_update_candidate:false,rename_candidate:false,metadata_candidate:false,attachment_candidate:false,reasons:[]});
             }
         }
 
-        const localOnly = [];
-        if (remoteUniverseComplete) {
-            for (const [id, local] of localScan.recordsById.entries()) {
-                if (globalRemoteIds.has(id)) continue;
-                if (duplicateIds.has(id) || localScan.blockedIds.has(id)) continue;
-                localOnly.push({ id, local, action: 'LOCAL_ONLY' });
-            }
-        }
-
-        const duplicateDetails = [
-            ...localScan.duplicates,
-            ...remoteDuplicates
-        ];
-
-        return {
-            items,
-            localOnly,
-            duplicateIds: Array.from(duplicateIds),
-            duplicateDetails,
-            errors: [...localScan.errors, ...remoteErrors],
-            summary: {
-                remote: allRemote.length,
-                remoteUnique: remoteById.size,
-                scopeRemote: scopeIds.size,
-                local: localScan.recordsById.size,
-                newCount,
-                remoteUpdateCandidateCount,
-                renameCandidateCount,
-                unchangedCount,
-                metadataCandidateCount,
-                rawOnlyVerifyCount,
-                localOnlyCount: remoteUniverseComplete ? localOnly.length : null,
-                localOnlyReliable: remoteUniverseComplete,
-                remoteUniverseComplete,
-                remoteUniverseNote,
-                duplicateIdCount: duplicateIds.size,
-                errorCount: errorCount + remoteErrors.length + localScan.errors.filter(error => !error.id).length,
-                maximumFetchRequired,
-                manifestTracked: localScan.stats.manifestTracked,
-                localProjectCount: localScan.stats.manifestProject || 0,
-                localRootCount: localScan.stats.manifestRoot || 0,
-                archiveLayoutVersion: localScan.stats.archiveLayoutVersion || CH_ARCHIVE_LAYOUT_VERSION,
-                provider: localScan.stats.provider || CH_PROVIDER,
-                migrationRequired: Boolean(localScan.stats.migrationRequired),
-                rawConversationFiles: localScan.stats.rawConversationFiles,
-                rawOnlyIds: localScan.stats.rawOnlyIds
-            }
-        };
+        const localOnly=[];
+        if(remoteUniverseComplete) for(const [id,local] of localScan.recordsById.entries()) if(!globalRemoteIds.has(id)&&!duplicateIds.has(id)&&!localScan.blockedIds.has(id))localOnly.push({id,local,action:'LOCAL_ONLY'});
+        return {items,localOnly,duplicateIds:Array.from(duplicateIds),duplicateDetails:[...localScan.duplicates,...remoteDuplicates],errors:[...localScan.errors,...remoteErrors],summary:{
+            remote:allRemote.length,remoteUnique:remoteById.size,scopeRemote:scopeIds.size,local:localScan.recordsById.size,newCount,remoteUpdateCandidateCount,renameCandidateCount,unchangedCount,metadataCandidateCount,attachmentCandidateCount,rawOnlyVerifyCount,
+            localOnlyCount:remoteUniverseComplete?localOnly.length:null,localOnlyReliable:remoteUniverseComplete,remoteUniverseComplete,remoteUniverseNote,duplicateIdCount:duplicateIds.size,
+            errorCount:errorCount+remoteErrors.length+localScan.errors.filter(e=>!e.id).length,maximumFetchRequired,manifestTracked:localScan.stats.manifestTracked,localProjectCount:localScan.stats.manifestProject||0,localRootCount:localScan.stats.manifestRoot||0,archiveLayoutVersion:localScan.stats.archiveLayoutVersion,provider:localScan.stats.provider,migrationRequired:Boolean(localScan.stats.migrationRequired),rawConversationFiles:localScan.stats.rawConversationFiles,rawOnlyIds:localScan.stats.rawOnlyIds,trackedFastChecked:localScan.stats.trackedFastChecked||0
+        }};
     }
 
     function chPreflightReportText(plan) {
@@ -1670,7 +1522,7 @@
         document.body.appendChild(overlay);
     }
 
-    async function chRunPreflightPlanner({ rootHandle, remoteList, selectedIds = null, remoteUniverseComplete = true, remoteUniverseNote = null }) {
+    async function chRunPreflightPlanner({ rootHandle, remoteList, selectedIds = null, remoteUniverseComplete = true, remoteUniverseNote = null, includeAttachments = false }) {
         chSetProgress('目录预检', '只读扫描本地档案…', 0);
         const localScan = await chScanLocalArchiveReadOnly(rootHandle, info => {
             const seen = info.jsonFilesSeen || 0;
@@ -1688,7 +1540,8 @@
         chSetProgress('目录预检', '生成同步计划（不抓取详情、不写盘）…', 70);
         const plan = chBuildPreflightPlan(remoteList, localScan, selectedIds, {
             remoteUniverseComplete,
-            remoteUniverseNote
+            remoteUniverseNote,
+            includeAttachments
         });
         const s = plan.summary;
         chSetProgress(
@@ -1711,36 +1564,172 @@
         'RENAMED_ONLY',
         'UPDATED_AND_RENAMED',
         'METADATA_ONLY',
+        'ATTACHMENT_BACKFILL',
+        'OBSERVATION_ONLY',
         'LOCAL_UNTRACKED'
     ]);
 
     function chMergeRemoteEntries(entries) {
-        const merged = new Map();
-        for (const entry of Array.isArray(entries) ? entries : []) {
-            const id = chRemoteConversationId(entry);
-            if (!id) continue;
-            const normalized = { ...entry, id };
-            const existing = merged.get(id);
-            if (!existing) {
-                merged.set(id, normalized);
-                continue;
-            }
-            const existingTime = normalizeEpochSeconds(existing.update_time || 0);
-            const incomingTime = normalizeEpochSeconds(normalized.update_time || 0);
-            const newer = incomingTime >= existingTime ? normalized : existing;
-            const older = newer === normalized ? existing : normalized;
-            merged.set(id, {
-                ...older,
-                ...newer,
-                id,
-                projectId: newer.projectId || older.projectId || null,
-                projectTitle: newer.projectTitle || older.projectTitle || null,
-                is_archived: Boolean(newer.is_archived || older.is_archived),
-                create_time: newer.create_time || older.create_time || 0,
-                update_time: Math.max(existingTime, incomingTime) || newer.update_time || older.update_time || 0
+        const merged=new Map();
+        for(const entry of Array.isArray(entries)?entries:[]){
+            const id=chRemoteConversationId(entry); if(!id)continue;
+            const normalized={...entry,id}; const existing=merged.get(id);
+            if(!existing){merged.set(id,normalized);continue;}
+            const existingTime=normalizeEpochSeconds(existing.update_time||0), incomingTime=normalizeEpochSeconds(normalized.update_time||0);
+            const newer=incomingTime>existingTime?normalized:incomingTime<existingTime?existing:normalized;
+            const older=newer===normalized?existing:normalized;
+            const archiveA=existing.__chArchiveState||'known',archiveB=normalized.__chArchiveState||'known';
+            const archiveConflict=archiveA==='known'&&archiveB==='known'&&Boolean(existing.is_archived)!==Boolean(normalized.is_archived)&&existingTime===incomingTime;
+            const projectStateA=existing.__chProjectState||((existing.projectId||existing.projectTitle)?'known':'unknown');
+            const projectStateB=normalized.__chProjectState||((normalized.projectId||normalized.projectTitle)?'known':'unknown');
+            const projectKnownA=projectStateA==='known',projectKnownB=projectStateB==='known';
+            const projectConflict=projectKnownA&&projectKnownB&&String(existing.projectId??'')!==String(normalized.projectId??'');
+            const resolvedProject=projectConflict
+                ? {id:null,title:null,state:'unknown'}
+                : projectKnownB
+                    ? {id:normalized.projectId??null,title:normalized.projectTitle??null,state:'known'}
+                    : projectKnownA
+                        ? {id:existing.projectId??null,title:existing.projectTitle??null,state:'known'}
+                        : (projectStateA==='none'||projectStateB==='none')
+                            ? {id:null,title:null,state:'none'}
+                            : {id:null,title:null,state:'unknown'};
+            merged.set(id,{
+                ...older,...newer,id,
+                projectId:resolvedProject.id,
+                projectTitle:resolvedProject.title,
+                __chProjectState:resolvedProject.state,
+                is_archived:archiveConflict?Boolean(newer.is_archived):Boolean(newer.is_archived),
+                __chArchiveState:archiveConflict?'unknown':((newer.__chArchiveState||'known')==='unknown'?(older.__chArchiveState||'unknown'):'known'),
+                create_time:newer.create_time||older.create_time||0,
+                update_time:Math.max(existingTime,incomingTime)||newer.update_time||older.update_time||0
             });
         }
         return Array.from(merged.values());
+    }
+
+    const chRemoteRefreshFlights = new Map();
+
+    function chRemoteCacheIdentity(workspaceId = null) {
+        // Persistent cache must never guess across accounts. An explicit workspace is safe;
+        // otherwise prefer the active account cookie and only fall back when exactly one
+        // workspace identity is detectable. Ambiguous identity disables persistence.
+        if (workspaceId) {
+            const explicit = resolveWorkspaceId(workspaceId);
+            return explicit ? `${CH_PROVIDER}:${explicit}` : null;
+        }
+        const cookieMatch = document.cookie.match(/(?:^|; )_account=([^;]+)/);
+        if (cookieMatch?.[1]) return `${CH_PROVIDER}:${cookieMatch[1]}`;
+        const detected = detectAllWorkspaceIds();
+        return detected.length === 1 ? `${CH_PROVIDER}:${detected[0]}` : null;
+    }
+
+    function chOpenRemoteCacheDb() {
+        return new Promise((resolve,reject)=>{
+            if(typeof indexedDB==='undefined'){resolve(null);return;}
+            const req=indexedDB.open(CH_REMOTE_CACHE_DB,1);
+            req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(CH_REMOTE_CACHE_STORE))db.createObjectStore(CH_REMOTE_CACHE_STORE,{keyPath:'key'});};
+            req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error||new Error('IndexedDB open failed'));
+        });
+    }
+
+    async function chRemoteCacheGet(workspaceId = null) {
+        const key=chRemoteCacheIdentity(workspaceId); if(!key)return null;
+        try{const db=await chOpenRemoteCacheDb();if(!db)return null;return await new Promise((resolve,reject)=>{const tx=db.transaction(CH_REMOTE_CACHE_STORE,'readonly');const req=tx.objectStore(CH_REMOTE_CACHE_STORE).get(key);req.onsuccess=()=>resolve(req.result||null);req.onerror=()=>reject(req.error);});}catch(err){console.warn('[ChatHarbor] remote cache read failed',err);return null;}
+    }
+
+    async function chRemoteCachePut(workspaceId, snapshot) {
+        const key=chRemoteCacheIdentity(workspaceId); if(!key)return false;
+        try{const db=await chOpenRemoteCacheDb();if(!db)return false;const value={...snapshot,key,schema:CH_REMOTE_CACHE_SCHEMA,provider:CH_PROVIDER};await new Promise((resolve,reject)=>{const tx=db.transaction(CH_REMOTE_CACHE_STORE,'readwrite');tx.objectStore(CH_REMOTE_CACHE_STORE).put(value);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error||new Error('cache transaction aborted'));});return true;}catch(err){console.warn('[ChatHarbor] remote cache write failed',err);return false;}
+    }
+
+    function chHeadFingerprintEntry(entry) {
+        return [entry.__chSourceKey||'',chRemoteConversationId(entry),String(entry.title||''),normalizeEpochSeconds(entry.update_time||0),entry.__chArchiveState||'unknown',entry.is_archived===true?'1':entry.is_archived===false?'0':'?',entry.__chProjectState||'unknown',String(entry.projectId??''),String(entry.projectTitle??'')].join('|');
+    }
+
+    function chHeadFingerprint(entries) {
+        return (entries||[]).map(chHeadFingerprintEntry).sort().join('\n');
+    }
+
+    async function chRemoteHeaders(workspaceId = null) {
+        if(!await ensureAccessToken())throw new Error('无法获取 Access Token。');
+        const deviceId=getOaiDeviceId(); if(!deviceId)throw new Error('无法获取 oai-device-id。');
+        const headers={'Authorization':`Bearer ${accessToken}`,'oai-device-id':deviceId};
+        const resolved=resolveWorkspaceId(workspaceId); if(resolved)headers['ChatGPT-Account-Id']=resolved;
+        return headers;
+    }
+
+    async function chFetchRootHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT) {
+        const headers=await chRemoteHeaders(workspaceId); const entries=[];
+        for(const archived of [false,true]){
+            const r=await fetch(`/backend-api/conversations?offset=0&limit=${limit}&order=updated${archived?'&is_archived=true':''}`,{headers});
+            if(!r.ok)throw new Error(`远端列表快速刷新失败 (${r.status})`);
+            const j=await r.json();
+            for(const item of j.items||[])entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:archived,projectId:null,projectTitle:null,__chArchiveState:'known',__chProjectState:'unknown',__chSourceKey:`root:${archived?'archived':'active'}`});
+        }
+        return entries;
+    }
+
+    async function chFetchProjectHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT) {
+        const resolved=resolveWorkspaceId(workspaceId); if(!resolved)return [];
+        const projects=await getProjectSpaces(resolved,{conversationsPerGizmo:limit,ownedOnly:true}); const entries=[];
+        for(const project of projects)for(const item of project.conversations||[])entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:item.is_archived??false,projectId:project.id,projectTitle:project.title,__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chProjectState:'known',__chSourceKey:`project:${project.id}`});
+        return entries;
+    }
+
+    async function chFetchRemoteHeadSnapshot(workspaceId = null) {
+        const entries=[...(await chFetchRootHead(workspaceId)),...(await chFetchProjectHead(workspaceId))];
+        return {entries,fingerprint:chHeadFingerprint(entries),validatedAt:Date.now()};
+    }
+
+    async function chFetchRootFull(workspaceId = null) {
+        const headers=await chRemoteHeaders(workspaceId); const entries=[];
+        for(const archived of [false,true]){
+            let offset=0,hasMore=true;
+            while(hasMore){
+                const r=await fetch(`/backend-api/conversations?offset=${offset}&limit=${PAGE_LIMIT}&order=updated${archived?'&is_archived=true':''}`,{headers});
+                if(!r.ok)throw new Error(`远端列表完整刷新失败 (${r.status})`);
+                const j=await r.json(); const items=Array.isArray(j.items)?j.items:[];
+                for(const item of items)entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:archived,projectId:null,projectTitle:null,__chArchiveState:'known',__chProjectState:'unknown',__chSourceKey:`root:${archived?'archived':'active'}`});
+                hasMore=items.length===PAGE_LIMIT; offset+=items.length;
+                if(hasMore)await sleep(jitter());
+            }
+        }
+        return chMergeRemoteEntries(entries);
+    }
+
+    async function chFetchFullRemoteUniverse(workspaceId = null) {
+        const rootList=await chFetchRootFull(workspaceId);
+        let projectList=[]; let complete=true; let note=null;
+        try{
+            projectList=(await listProjectSpaceConversations(workspaceId)).map(item=>({...item,__chProjectState:'known',__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chSourceKey:`project:${item.projectId||'unknown'}`}));
+        }catch(err){complete=false;note=`project complement failed: ${err?.message||String(err)}`;}
+        const merged=chMergeRemoteEntries(rootList.concat(projectList)).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':complete?'none':'unknown',__chArchiveState:item.__chArchiveState||'unknown'}));
+        return {list:merged,complete,note:note||`full remote index ${merged.length}`};
+    }
+
+    async function chRefreshRemoteIndex(workspaceId = null, { forceFull = false } = {}) {
+        const flightKey=chRemoteCacheIdentity(workspaceId)||`volatile:${workspaceId||'default'}`;
+        if(chRemoteRefreshFlights.has(flightKey))return chRemoteRefreshFlights.get(flightKey);
+        const promise=(async()=>{
+            const cached=await chRemoteCacheGet(workspaceId); const now=Date.now();
+            const needsPeriodicFull=!cached||cached.schema!==CH_REMOTE_CACHE_SCHEMA||cached.provider!==CH_PROVIDER||cached.complete!==true||!cached.fullFetchedAt||(now-cached.fullFetchedAt)>=CH_REMOTE_FULL_REFRESH_MS;
+            if(forceFull||needsPeriodicFull){
+                const full=await chFetchFullRemoteUniverse(workspaceId); const head=await chFetchRemoteHeadSnapshot(workspaceId);
+                const snapshot={list:full.list,complete:full.complete,note:full.note,fullFetchedAt:now,validatedAt:head.validatedAt,headFingerprint:head.fingerprint};
+                if(full.complete)await chRemoteCachePut(workspaceId,snapshot);
+                return {...snapshot,refreshMode:'full'};
+            }
+            const head=await chFetchRemoteHeadSnapshot(workspaceId);
+            if(head.fingerprint===cached.headFingerprint){
+                const snapshot={...cached,validatedAt:head.validatedAt,note:`fast refresh stable · head ${CH_REMOTE_HEAD_LIMIT}`};
+                await chRemoteCachePut(workspaceId,snapshot); return {...snapshot,refreshMode:'fast-stable'};
+            }
+            const full=await chFetchFullRemoteUniverse(workspaceId); const refreshedHead=await chFetchRemoteHeadSnapshot(workspaceId);
+            const snapshot={list:full.list,complete:full.complete,note:full.note,fullFetchedAt:Date.now(),validatedAt:refreshedHead.validatedAt,headFingerprint:refreshedHead.fingerprint};
+            if(full.complete)await chRemoteCachePut(workspaceId,snapshot);
+            return {...snapshot,refreshMode:'full-after-change'};
+        })().finally(()=>chRemoteRefreshFlights.delete(flightKey));
+        chRemoteRefreshFlights.set(flightKey,promise); return promise;
     }
 
     function chTargetRelativePrefix(entry) {
@@ -2084,110 +2073,38 @@
     }
 
     function chFinalMetadataDiffs(remote, local) {
-        const reasons = [];
-        if (Object.prototype.hasOwnProperty.call(remote || {}, 'is_archived') &&
-            Boolean(remote?.is_archived) !== Boolean(local?.is_archived)) {
-            reasons.push('ARCHIVE_STATE_DIFF');
-        }
-        if (Object.prototype.hasOwnProperty.call(remote || {}, 'projectId') &&
-            String(remote?.projectId ?? '') !== String(local?.project_id ?? '')) {
-            reasons.push('PROJECT_ID_DIFF');
-        }
-        if (Object.prototype.hasOwnProperty.call(remote || {}, 'projectTitle') &&
-            String(remote?.projectTitle ?? '') !== String(local?.project_title ?? '')) {
-            reasons.push('PROJECT_TITLE_DIFF');
-        }
+        const reasons=[];
+        const archiveKnown=(remote?.__chArchiveState||'known')!=='unknown';
+        const projectKnown=(remote?.__chProjectState||'known')!=='unknown';
+        if(archiveKnown&&Object.prototype.hasOwnProperty.call(remote||{},'is_archived')&&Boolean(remote?.is_archived)!==Boolean(chRecordListArchiveState(local)))reasons.push('ARCHIVE_STATE_DIFF');
+        if(projectKnown&&String(remote?.projectId??'')!==String(chRecordListProjectId(local)??''))reasons.push('PROJECT_ID_DIFF');
+        if(projectKnown&&String(remote?.projectTitle??'')!==String(chRecordListProjectTitle(local)??''))reasons.push('PROJECT_TITLE_DIFF');
         return reasons;
     }
 
-    async function chClassifyFetchedConversation(preflightItem, convData) {
-        const remote = preflightItem?.remote || {};
-        const local = preflightItem?.local || null;
-        const id = chGetConversationId(remote, convData);
-        const remoteTitle = String(convData?.title || remote?.title || '');
-        const remoteUpdateTime = convData?.update_time ?? remote?.update_time ?? null;
-        const newSignature = await chContentSignature(convData);
+    async function chClassifyFetchedConversation(preflightItem, convData, options = {}) {
+        const includeAttachments=Boolean(options.includeAttachments);
+        const remote=preflightItem?.remote||{}; const local=preflightItem?.local||null;
+        const id=chGetConversationId(remote,convData); const detailTitle=String(convData?.title||remote?.title||'');
+        const remoteUpdateTime=convData?.update_time??remote?.update_time??null; const newSignature=await chContentSignature(convData);
+        const attachmentInspection=chInspectAttachmentCompleteness(convData,local);
+        if(!local)return {...preflightItem,id,finalAction:'NEW',convData,newSignature,contentChanged:true,titleChanged:false,metadataChanged:false,timestampChanged:false,attachmentInspection,needs_sync:true,finalReasons:['NOT_IN_LOCAL_ARCHIVE']};
+        if(local.tracking!=='manifest')return {...preflightItem,id,finalAction:'LOCAL_UNTRACKED',convData,newSignature,contentChanged:null,titleChanged:detailTitle!==String(local?.title||''),metadataChanged:false,timestampChanged:chTimeRelation(remoteUpdateTime,local?.remote_update_time)!=='same',attachmentInspection,needs_sync:true,finalReasons:['LOCAL_RAW_NOT_MANIFEST_TRACKED','NO_AUTHORITATIVE_LOCAL_SIGNATURE']};
+        const oldSignature=String(local?.content_signature||'');
+        if(!oldSignature)return {...preflightItem,id,finalAction:'ERROR',convData,newSignature,contentChanged:null,titleChanged:detailTitle!==String(local?.title||''),metadataChanged:null,timestampChanged:null,attachmentInspection,needs_sync:false,finalReasons:['LOCAL_SIGNATURE_MISSING'],error:'Tracked manifest record has no content_signature'};
 
-        if (!local) {
-            return {
-                ...preflightItem,
-                id,
-                finalAction: 'NEW',
-                convData,
-                newSignature,
-                contentChanged: true,
-                titleChanged: false,
-                metadataChanged: false,
-                timestampChanged: false,
-                needs_sync: true,
-                finalReasons: ['NOT_IN_LOCAL_ARCHIVE']
-            };
-        }
-
-        if (local.tracking !== 'manifest') {
-            return {
-                ...preflightItem,
-                id,
-                finalAction: 'LOCAL_UNTRACKED',
-                convData,
-                newSignature,
-                contentChanged: null,
-                titleChanged: remoteTitle !== String(local?.title || ''),
-                metadataChanged: false,
-                timestampChanged: !chTimeEquivalent(remoteUpdateTime, local?.remote_update_time),
-                needs_sync: true,
-                finalReasons: ['LOCAL_RAW_NOT_MANIFEST_TRACKED', 'NO_AUTHORITATIVE_LOCAL_SIGNATURE']
-            };
-        }
-
-        const oldSignature = String(local?.content_signature || '');
-        if (!oldSignature) {
-            return {
-                ...preflightItem,
-                id,
-                finalAction: 'ERROR',
-                convData,
-                newSignature,
-                contentChanged: null,
-                titleChanged: remoteTitle !== String(local?.title || ''),
-                metadataChanged: null,
-                timestampChanged: null,
-                needs_sync: false,
-                finalReasons: ['LOCAL_SIGNATURE_MISSING'],
-                error: 'Tracked manifest record has no content_signature'
-            };
-        }
-
-        const contentChanged = newSignature !== oldSignature;
-        const titleChanged = remoteTitle !== String(local?.title || '');
-        const metadataReasons = chFinalMetadataDiffs(remote, local);
-        const metadataChanged = metadataReasons.length > 0;
-        const timestampChanged = !chTimeEquivalent(remoteUpdateTime, local?.remote_update_time);
-
-        let finalAction = 'UNCHANGED';
-        if (contentChanged && titleChanged) finalAction = 'UPDATED_AND_RENAMED';
-        else if (contentChanged) finalAction = 'UPDATED';
-        else if (titleChanged) finalAction = 'RENAMED_ONLY';
-        else if (metadataChanged || timestampChanged) finalAction = 'METADATA_ONLY';
-
-        return {
-            ...preflightItem,
-            id,
-            finalAction,
-            convData,
-            newSignature,
-            contentChanged,
-            titleChanged,
-            metadataChanged,
-            timestampChanged,
-            needs_sync: finalAction !== 'UNCHANGED',
-            finalReasons: [
-                ...(contentChanged ? ['CONTENT_SIGNATURE_DIFF'] : []),
-                ...(titleChanged ? ['TITLE_DIFF'] : []),
-                ...metadataReasons,
-                ...(timestampChanged ? ['REMOTE_UPDATE_TIME_DIFF'] : [])
-            ]
-        };
+        const contentChanged=newSignature!==oldSignature;
+        const titleChanged=detailTitle!==String(local?.title||'');
+        const metadataReasons=chFinalMetadataDiffs(remote,local); const metadataChanged=metadataReasons.length>0;
+        const timestampChanged=chTimeRelation(remoteUpdateTime,local?.remote_update_time)==='different';
+        const attachmentBackfill=includeAttachments&&!['complete','none'].includes(attachmentInspection.state);
+        let finalAction='OBSERVATION_ONLY';
+        if(contentChanged&&titleChanged)finalAction='UPDATED_AND_RENAMED';
+        else if(contentChanged)finalAction='UPDATED';
+        else if(titleChanged)finalAction='RENAMED_ONLY';
+        else if(attachmentBackfill)finalAction='ATTACHMENT_BACKFILL';
+        else if(metadataChanged)finalAction='METADATA_ONLY';
+        return {...preflightItem,id,finalAction,convData,newSignature,contentChanged,titleChanged,metadataChanged,timestampChanged,attachmentInspection,attachmentBackfill,needs_sync:true,finalReasons:[...(contentChanged?['CONTENT_SIGNATURE_DIFF']:[]),...(titleChanged?['TITLE_DIFF']:[]),...metadataReasons,...(timestampChanged?['DETAIL_UPDATE_TIME_DIFF']:[]),...(attachmentBackfill?[`ATTACHMENT_${attachmentInspection.state.toUpperCase()}`]:[]),...(finalAction==='OBSERVATION_ONLY'?['REMOTE_OBSERVATION_ADVANCE']:[])]};
     }
 
     async function chVerifyPreflightCandidates({ plan, workspaceId = null }) {
@@ -2220,7 +2137,7 @@
             try {
                 await chControlCheckpoint('detail-verification');
                 const convData = await chGetConversationConservative(item.id, workspaceId);
-                resultItems.push(await chClassifyFetchedConversation(item, convData));
+                resultItems.push(await chClassifyFetchedConversation(item, convData, { includeAttachments: false }));
             } catch (err) {
                 if (chIsCancellation(err)) throw err;
                 resultItems.push({
@@ -2267,21 +2184,27 @@
     }
 
     function chMetadataOnlyRecord(existingRecord, classifiedItem) {
-        const remote = classifiedItem.remote || {};
-        const convData = classifiedItem.convData || {};
+        const remote=classifiedItem.remote||{}; const convData=classifiedItem.convData||{};
+        const observed=chRemoteObservation(remote,existingRecord);
+        const inspection=classifiedItem.attachmentInspection||null;
+        const projectKnown=(remote?.__chProjectState||'known')!=='unknown';
+        const archiveKnown=(remote?.__chArchiveState||'known')!=='unknown';
         return {
             ...existingRecord,
-            title: convData.title || remote.title || existingRecord.title,
+            title: convData.title || existingRecord.title,
             create_time: convData.create_time ?? remote.create_time ?? existingRecord.create_time ?? null,
-            remote_update_time: convData.update_time ?? remote.update_time ?? existingRecord.remote_update_time ?? null,
-            is_archived: convData.is_archived ?? remote.is_archived ?? existingRecord.is_archived ?? false,
-            project_id: remote.projectId ?? existingRecord.project_id ?? null,
-            project_title: remote.projectTitle ?? existingRecord.project_title ?? null,
-            provider: CH_PROVIDER,
-            archive_layout_version: CH_ARCHIVE_LAYOUT_VERSION,
-            content_signature: classifiedItem.newSignature || existingRecord.content_signature,
-            signature_version: CH_SIGNATURE_VERSION,
-            synced_at: new Date().toISOString()
+            remote_update_time: convData.update_time ?? existingRecord.remote_update_time ?? null,
+            is_archived: archiveKnown ? Boolean(remote?.is_archived) : (existingRecord.is_archived ?? false),
+            project_id: projectKnown ? (remote?.projectId ?? null) : (existingRecord.project_id ?? null),
+            project_title: projectKnown ? (remote?.projectTitle ?? null) : (existingRecord.project_title ?? null),
+            ...observed,
+            provider:CH_PROVIDER,archive_layout_version:CH_ARCHIVE_LAYOUT_VERSION,
+            content_signature:classifiedItem.newSignature||existingRecord.content_signature,signature_version:CH_SIGNATURE_VERSION,
+            attachment_state:inspection?.state||chRecordAttachmentState(existingRecord),
+            attachments_checked_at:inspection?new Date().toISOString():(existingRecord.attachments_checked_at||null),
+            attachment_detected:inspection?.detected??existingRecord.attachment_detected,
+            // synced_at intentionally remains the last content/file commit time.
+            synced_at: existingRecord.synced_at || null
         };
     }
 
@@ -2383,7 +2306,7 @@
         const oldRecord = manifest.conversations?.[id] || null;
         const expected = chExpectedStoragePaths(remote, convData);
 
-        const metadataOnlyInPlace = action === 'METADATA_ONLY' && oldRecord &&
+        const metadataOnlyInPlace = ['METADATA_ONLY','OBSERVATION_ONLY'].includes(action) && oldRecord &&
             oldRecord.json_path === expected.json_path &&
             oldRecord.markdown_path === expected.markdown_path;
 
@@ -2559,7 +2482,8 @@
         }
         const plan = chBuildPreflightPlan(remoteList, localScan, selected, {
             remoteUniverseComplete,
-            remoteUniverseNote
+            remoteUniverseNote,
+            includeAttachments
         });
         const fetchTotal = plan.items.filter(item => item.needs_detail_fetch && item.action !== 'ERROR' && item.action !== 'DUPLICATE').length;
         if (fetchTotal > 0 && !await ensureAccessToken()) {
@@ -2606,7 +2530,7 @@
                         const convData = await chGetConversationConservative(item.id, workspaceId);
                         verification.detailFetchCount++;
                         fetchIndex++;
-                        classified = await chClassifyFetchedConversation(item, convData);
+                        classified = await chClassifyFetchedConversation(item, convData, { includeAttachments });
                     } catch (err) {
                         if (chIsCancellation(err)) throw err;
                         verification.detailFetchCount++;

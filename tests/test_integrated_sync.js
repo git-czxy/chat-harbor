@@ -19,6 +19,7 @@ function generateMarkdownFilename(c){ return generateUniqueFilename(c).replace(/
 function chRemoteConversationId(e){ return String(e?.id||e?.conversation_id||''); }
 function chTimeEquivalent(a,b){ const aa=normalizeEpochSeconds(a),bb=normalizeEpochSeconds(b); return !!aa&&!!bb&&Math.abs(aa-bb)<=0.001; }
 function chGetConversationId(entry, convData){ return convData?.conversation_id||convData?.id||entry?.id||null; }
+function collectVisibleAttachments(){ return []; }
 async function chContentSignature(c){ return c.__sig || 'sig'; }
 function chExistingAttachmentResult(existingRecord){
   const assets=existingRecord?.assets||[]; return assets.length?{detected:assets.length,files:[],failures:[],sandboxPaths:new Map(),folderName:existingRecord.asset_dir,reusedExisting:true,sandboxSourceComplete:true}:null;
@@ -50,6 +51,21 @@ chShowIntegratedSyncReport = ()=>{};
   ]);
   assert.strictEqual(merged.length,2);
   assert.strictEqual(merged.find(x=>x.id==='A').projectTitle,'P');
+  const conflict=chMergeRemoteEntries([
+    {id:'Z',title:'Z',update_time:10,is_archived:true,__chArchiveState:'known'},
+    {id:'Z',title:'Z',update_time:10,is_archived:false,__chArchiveState:'known'}
+  ])[0];
+  assert.strictEqual(conflict.__chArchiveState,'unknown');
+  const projectConflict=chMergeRemoteEntries([
+    {id:'PZ',title:'PZ',update_time:10,projectId:'p1',projectTitle:'P1',__chProjectState:'known'},
+    {id:'PZ',title:'PZ',update_time:10,projectId:'p2',projectTitle:'P2',__chProjectState:'known'}
+  ])[0];
+  assert.strictEqual(projectConflict.__chProjectState,'unknown');
+  assert.strictEqual(projectConflict.projectId,null);
+  const headA=[{id:'A',title:'A',update_time:10,__chSourceKey:'root:active',__chArchiveState:'known',is_archived:false,__chProjectState:'unknown'}];
+  const headB=[...headA].reverse();
+  assert.strictEqual(chHeadFingerprint(headA),chHeadFingerprint(headB));
+  assert.notStrictEqual(chHeadFingerprint(headA),chHeadFingerprint([{...headA[0],update_time:11}]));
 
   const manifestLocal=(title='T',sig='same',time=100,extra={})=>({
     conversation_id:'X', title, content_signature:sig, remote_update_time:time, tracking:'manifest',
@@ -70,13 +86,13 @@ chShowIntegratedSyncReport = ()=>{};
   assert.strictEqual(r.finalAction,'UPDATED_AND_RENAMED');
 
   r=await chClassifyFetchedConversation(baseItem(manifestLocal('T','same',100)),{conversation_id:'X',title:'T',update_time:101,__sig:'same'});
-  assert.strictEqual(r.finalAction,'METADATA_ONLY');
+  assert.strictEqual(r.finalAction,'OBSERVATION_ONLY');
 
   r=await chClassifyFetchedConversation(baseItem(manifestLocal('T','same',100),{id:'X',title:'T',update_time:100,is_archived:true,projectId:null,projectTitle:null}),{conversation_id:'X',title:'T',update_time:100,__sig:'same'});
   assert.strictEqual(r.finalAction,'METADATA_ONLY');
 
   r=await chClassifyFetchedConversation(baseItem(manifestLocal('T','same',100)),{conversation_id:'X',title:'T',update_time:100,__sig:'same'});
-  assert.strictEqual(r.finalAction,'UNCHANGED');
+  assert.strictEqual(r.finalAction,'OBSERVATION_ONLY');
 
   r=await chClassifyFetchedConversation(baseItem(manifestLocal('T','',100)),{conversation_id:'X',title:'T',update_time:101,__sig:'same'});
   assert.strictEqual(r.finalAction,'ERROR');
@@ -161,6 +177,27 @@ chShowIntegratedSyncReport = ()=>{};
   assert.deepStrictEqual(order3,['manifest']);
   assert.strictEqual(metaApplied.mode,'MANIFEST_ONLY');
 
+  // A successful verification with unchanged content must advance the remote-list checkpoint.
+  const oldObserved={...manifestLocal('T','same',100),synced_at:'2026-01-01T00:00:00.000Z'};
+  const manifestObs={conversations:{X:oldObserved}};
+  const observationItem={id:'X',finalAction:'OBSERVATION_ONLY',remote:{id:'X',title:'T',update_time:101,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'},convData:{conversation_id:'X',title:'T',update_time:100,__sig:'same'},newSignature:'same',attachmentInspection:{state:'none',detected:0,missing:0}};
+  const obsApplied=await chApplyClassifiedSyncItem({rootHandle:{},classifiedItem:observationItem,manifest:manifestObs,deps:{writeConversation:async()=>{throw new Error('must not write');},writeManifest:async()=>{},cleanup:async()=>({removed:[],warnings:[]})}});
+  assert.strictEqual(obsApplied.mode,'MANIFEST_ONLY');
+  assert.strictEqual(manifestObs.conversations.X.remote_list_update_time,101);
+  assert.strictEqual(manifestObs.conversations.X.synced_at,'2026-01-01T00:00:00.000Z');
+  const scanObs={recordsById:new Map([['X',{...manifestObs.conversations.X,tracking:'manifest'}]]),duplicateIds:new Set(),duplicates:[],blockedIds:new Set(),errors:[],errorsById:new Map(),stats:{manifestTracked:1,manifestProject:0,manifestRoot:1,archiveLayoutVersion:2,provider:'chatgpt',migrationRequired:false,rawConversationFiles:0,rawOnlyIds:0,trackedFastChecked:1}};
+  const converged=chBuildPreflightPlan([{id:'X',title:'T',update_time:101,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'}],scanObs);
+  assert.strictEqual(converged.items[0].action,'UNCHANGED');
+  assert.strictEqual(converged.summary.maximumFetchRequired,0);
+
+  // Attachment policy is independent: default-off does not trigger verification; turning it on does.
+  const unknownAttachment={...manifestObs.conversations.X,attachment_state:'unknown',remote_list_update_time:101,remote_list_title:'T',remote_list_is_archived:false,remote_list_project_id:null,remote_list_project_title:null,tracking:'manifest'};
+  const attachScan={...scanObs,recordsById:new Map([['X',unknownAttachment]])};
+  assert.strictEqual(chBuildPreflightPlan([{id:'X',title:'T',update_time:101,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'}],attachScan,null,{includeAttachments:false}).items[0].action,'UNCHANGED');
+  const attachPlan=chBuildPreflightPlan([{id:'X',title:'T',update_time:101,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'}],attachScan,null,{includeAttachments:true});
+  assert.strictEqual(attachPlan.items[0].action,'VERIFY_CHANGED');
+  assert(attachPlan.items[0].reasons.includes('ATTACHMENT_UNKNOWN'));
+
 
   // Cleanup removes only old manifest-tracked files and never recursively deletes legacy-untracked assets.
   class FakeEntryFile { constructor(){ this.kind='file'; } }
@@ -223,12 +260,15 @@ chShowIntegratedSyncReport = ()=>{};
   chEndControlledRun();
 
   console.log('PASS final classification matrix');
-  console.log('PASS canonical remote-universe merge');
+  console.log('PASS canonical remote-universe merge + ambiguity preservation');
+  console.log('PASS remote-head stable fingerprint / change detection');
   console.log('PASS attachment link relocation');
   console.log('PASS candidate-only detail fetch');
   console.log('PASS write -> manifest -> cleanup transaction ordering');
   console.log('PASS manifest-failure cleanup barrier');
-  console.log('PASS in-place METADATA_ONLY manifest-only commit');
+  console.log('PASS in-place METADATA_ONLY / OBSERVATION_ONLY manifest-only commit');
+  console.log('PASS repeated-verification convergence checkpoint');
+  console.log('PASS attachment completeness policy separation');
   console.log('PASS tracked-only cleanup preserves legacy-untracked assets');
   console.log('PASS incomplete full-sync stop condition');
   console.log('PASS streaming fetch -> classify -> atomic commit ordering');

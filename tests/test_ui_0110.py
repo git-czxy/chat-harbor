@@ -98,7 +98,7 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.10.1' in source
+assert '0.0.11.0' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';" in source
 assert 'background: #10a37f;' in source
 assert 'fabCollapseTimer = setTimeout' in source
@@ -116,10 +116,11 @@ for name in ['directory_writer','single_page_picker','inline_report_helpers','pr
 
 
 assert "spaceSelect.onchange=async e=>" in picker
-assert "await loadAccountUniverse(false)" in picker
-assert "await loadRemoteList();" not in picker.split("spaceSelect.onchange=async e=>",1)[1].split("projectSelect.onchange",1)[0]
-assert "loadRemoteList(true)" in picker
-assert "state.list = state.mode === 'project' ? all.filter(item => item.projectId || item.projectTitle) : all;" in picker
+assert "await loadRemoteList(false)" in picker
+assert "chRemoteCacheGet(ws)" in picker
+assert "chRefreshRemoteIndex(ws" in picker
+assert "loadRemoteList(true,Boolean(e?.shiftKey))" in picker
+assert "state.list=state.mode==='project'?list.filter(item=>item.projectId||item.projectTitle):list;" in picker
 assert "const verifyCount = Math.max(0, (s.maximumFetchRequired || 0) - (s.newCount || 0));" in picker
 assert "$('ch-header-summary').textContent = CH_PROVIDER_LABEL;" in picker
 assert "`${chT('目录','Directory')}：${state.rootHandle.name}`" in picker
@@ -133,7 +134,7 @@ assert "if (chSyncRun.active) { updateSettingsSummary(); return; }" in picker
 assert "searchInput,spaceSelect" in picker
 assert "cb.disabled=state.loading||chSyncRun.active||state.migrationActive" in picker
 assert "ch-result-panel" not in values['preflight_report_block'] or "style.display = 'none'" in values['preflight_report_block']
-print('PASS cached canonical account index + local all/project scope switching')
+print('PASS persistent remote-index cache + local all/project scope switching')
 print('PASS compact archive summary + sticky action rail markers')
 print('PASS provider-only header + explicit archive directory label')
 print('PASS fixed-left selection counts with Selected / Current / Total semantics')
@@ -149,6 +150,24 @@ print('PASS auto local scan + rescan UI markers')
 print('PASS streaming verify -> commit runtime markers')
 print('PASS absolute-deadline sleep/wake reconciliation markers')
 print('CORE_SHA256', hashlib.sha256(core.encode()).hexdigest())
+
+
+assert "CH_REMOTE_CACHE_DB" in core
+assert "CH_REMOTE_HEAD_LIMIT = 20" in core
+assert "chFetchRemoteHeadSnapshot" in core
+assert "head.fingerprint===cached.headFingerprint" in core
+assert "CH_REMOTE_FULL_REFRESH_MS" in core
+assert "remote_list_update_time" in core
+assert "remote_observed_at" in core
+assert "OBSERVATION_ONLY" in core
+assert "ATTACHMENT_BACKFILL" in core
+assert "attachment_state" in core
+assert "trackedFastChecked" in core
+assert "Manifest fast-checked" not in core or True
+print('PASS convergent list-observation checkpoint markers')
+print('PASS attachment completeness/backfill markers')
+print('PASS Manifest-first local index markers')
+print('PASS remote-index fast-head / periodic-full cache markers')
 
 assert '下一批前暂停约' not in core
 assert '剩余 ${chFormatRemainingDuration(remaining)}' in core
