@@ -35,7 +35,7 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.6.0\n"
+    "// @version      0.0.6.1\n"
     "// @description  Clean-lineage local archive scan, version-aware classification and selective directory sync.\n"
     "// @description:zh-CN 干净来源的本地档案扫描、版本识别分类与选择性目录同步。\n"
     "// @author       huhu; ChatHarbor contributors\n"
@@ -2136,6 +2136,36 @@ sync_handler = r'''            syncDirBtn.onclick = async () => {
 
 text = text.replace(handler_anchor, preflight_handler + sync_handler + handler_anchor, 1)
 
+# ChatHarbor UI hotfix 0.0.6.1:
+# Upstream v1.5 auto-collapses the right-edge launcher after 2.5 seconds. For ChatHarbor,
+# discoverability is more important than the half-hidden handle, so keep it fully visible.
+old_collapse = '''    function fabScheduleCollapse(btn) {
+        clearTimeout(fabCollapseTimer);
+        if (!fabState.docked) return;
+        fabCollapseTimer = setTimeout(() => {
+            if (!btn.classList.contains('gre-busy') && !btn.classList.contains('gre-progress') && !btn.matches(':hover')) {
+                fabCollapse(btn);
+            }
+        }, 2500);
+    }
+'''
+new_collapse = '''    function fabScheduleCollapse(btn) {
+        clearTimeout(fabCollapseTimer);
+        // ChatHarbor: keep the primary launcher fully visible.
+        // Dragging and edge snapping remain available; only automatic half-hide is disabled.
+        if (fabIsCollapsed(btn)) fabExpand(btn);
+    }
+'''
+if old_collapse not in text:
+    raise SystemExit("Launcher visibility anchor not found")
+text = text.replace(old_collapse, new_collapse, 1)
+
+# Make the sync path visible from the first dialog without introducing a second selector.
+text = text.replace('选择要导出的空间', 'ChatHarbor｜选择空间', 1)
+text = text.replace('选择要导出的对话', '选择对话｜导出 / 本地同步', 1)
+text = text.replace('>选择对话导出</button>', '>选择对话 / 目录同步</button>')
+
+
 render_query_anchor = '''            const exportBtn = dialog.querySelector('#export-selected-btn');
             const selectAllBtn = dialog.querySelector('#select-all-btn');'''
 render_query_repl = '''            const preflightBtn = dialog.querySelector('#preflight-plan-btn');
@@ -2176,6 +2206,21 @@ text = text.replace(progress_anchor, progress_replacement, 1)
 attachment_hint_old = "默认关闭；开启后导出时间和 ZIP 体积可能明显增加。"
 attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能明显增加。"
 text = text.replace(attachment_hint_old, attachment_hint_new)
+
+# Build-time UI/runtime invariants: fail closed instead of generating a script with no visible entry.
+required_runtime_markers = [
+    "function initFab()",
+    "getExportButton();",
+    "document.addEventListener('DOMContentLoaded', initFab);",
+    "#gpt-rescue-btn",
+    "ChatHarbor｜选择空间",
+    "选择对话 / 目录同步",
+    "id=\"preflight-plan-btn\"",
+    "id=\"sync-directory-btn\"",
+]
+missing_runtime_markers = [marker for marker in required_runtime_markers if marker not in text]
+if missing_runtime_markers:
+    raise SystemExit("Generated runtime invariant failed; missing: " + ", ".join(missing_runtime_markers))
 
 out.write_text(text, encoding="utf-8")
 print(f"Wrote: {out}")

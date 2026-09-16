@@ -47,5 +47,7 @@
     "manifest": "ChatHarbor_manifest.json",
     "local_only_auto_delete": false,
     "untracked_legacy_asset_auto_delete": false
-  }
+  },
+  "integrated_build_version": "0.0.6.1",
+  "hotfix": "entry-visibility"
 }
