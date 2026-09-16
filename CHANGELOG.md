@@ -1,3 +1,18 @@
+## 0.0.12.0 — 2026-09-15
+
+### Runtime convergence
+- Added one serialized backend request scheduler for ChatHarbor remote lists, project enumeration, conversation detail and attachment-metadata requests.
+- Added shared HTTP 429 cooldown; API throttling now pauses the whole ChatHarbor backend-control request stream instead of allowing sibling paths to continue hitting the API.
+- Added separate conservative retry handling for signed/direct attachment binary transfer without applying normal control-plane spacing to the binary payload itself.
+- Removed duplicate explicit detail-loop sleeps now that cadence and batch pauses are scheduler-owned.
+- Made background Remote Index refresh single-flight and sync-aware; active runs freeze their remote snapshot and defer later refresh application until completion.
+- Changed visible sync state to commit-accurate semantics: classification alone can no longer display a successful synchronized state; commit failures become errors.
+- Extended Manifest-first local checks to tracked attachment existence/size and made attachment reuse require physical-file validation.
+- Added best-effort cleanup of newly written attachment files when Manifest commit fails.
+
+### Preserved
+- Layout v2, LOCAL_ONLY safety, convergent remote-list checkpoints, persistent Remote Index cache/fast-head refresh, missing-only attachment backfill, monotonic attachment progress, pause/resume/cancel and clean-lineage upstream pinning remain in force.
+
 # ChatHarbor Changelog
 
 ## 0.0.11.4 — 2026-09-15

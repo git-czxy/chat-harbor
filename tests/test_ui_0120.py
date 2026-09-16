@@ -90,7 +90,11 @@ for marker in [
     "visibilitychange",
     "wake-guard",
     "chFormatRemainingDuration",
-    "{ countdown: true }",
+    "API 限流（429）",
+    "async function chBackendFetch",
+    "async function chDataTransferFetch",
+    "const chBackendScheduler",
+    "onItemFailed",
     "onItemClassified",
     "onItemCommitted",
     "核验并同步",
@@ -98,8 +102,8 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.11.4' in source
-assert '// @version      0.0.11.4' in source
+assert '0.0.12.0' in source
+assert '// @version      0.0.12.0' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v2';" in source
 assert 'background: #10a37f;' in source
 
@@ -200,3 +204,30 @@ assert "launcher.classList.add('gre-busy')" in picker
 assert 'background:#fef3c7;color:#92400e' in picker
 assert "`${chT('本地','Local')} ${s.local || 0}（${chT('项目内','in projects')}" in picker
 print('PASS current-item progress wording + archived amber badge')
+
+
+# 0.0.12.0 cross-cutting invariants.
+assert 'remoteRefreshPromise' in picker
+assert 'pendingRemoteSnapshot' in picker
+assert 'await state.remoteRefreshPromise' in picker
+assert 'onItemFailed:(item)' in picker
+assert "state.syncStatusById.set(item.id,'ERROR')" in picker
+assert 'assetFastChecked' in core
+assert "record.attachment_state = 'partial'" in core
+assert 'Reuse only assets whose Manifest identity and physical file both remain valid' in core
+assert '__ch_new_asset_paths' in core
+assert 'priorManifestRecord' in core
+assert "chRemoveTrackedEntry(rootHandle, path, false)" in core
+assert 'const chBackendScheduler' in core
+assert 'async function chBackendFetch' in core
+assert 'async function chDataTransferFetch' in core
+assert "cooldownReason = 'HTTP_429'" in core
+assert 'chWithBackendSerial' in core
+# The patcher must rewrite all ChatHarbor /backend-api control fetches and metadata fetches.
+assert 'text = text.replace("await fetch(`/backend-api/", "await chBackendFetch(`/backend-api/")' in source
+assert 'text = text.replace("await fetch(metadataUrl' in source
+assert 'text = text.replace("await fetch(parsedUrl.href, sameOrigin", "await chDataTransferFetch(parsedUrl.href, sameOrigin")' in source
+print('PASS shared backend scheduler + global cooldown markers')
+print('PASS remote-refresh single-flight / run snapshot freeze markers')
+print('PASS physical attachment integrity + manifest rollback markers')
+print('PASS commit-accurate UI status markers')

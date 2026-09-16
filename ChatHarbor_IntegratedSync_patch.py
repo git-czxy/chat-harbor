@@ -35,9 +35,9 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.11.4\n"
-    "// @description  Clean-lineage archive sync with convergent incremental compare, Manifest-first local indexing, legacy attachment-state inference, missing-only attachment backfill, monotonic attachment progress, and cached remote-index fast refresh.\n"
-    "// @description:zh-CN 干净来源的本地档案同步：收敛式增量比较、Manifest-first 本地索引、旧附件状态安全推导、仅补缺失附件、单调附件进度与远端索引缓存快速刷新。\n"
+    "// @version      0.0.12.0\n"
+    "// @description  Clean-lineage archive sync with convergent incremental compare, Manifest-first indexing, incremental attachments, shared backend request scheduling, global cooldown, commit-accurate UI state, and cached remote-index fast refresh.\n"
+    "// @description:zh-CN 干净来源的本地档案同步：收敛式增量比较、Manifest-first 索引、附件增量补齐、统一后端请求调度、全局限流冷却、提交准确状态与远端索引缓存快速刷新。\n"
     "// @author       huhu; ChatHarbor contributors\n"
 )
 
@@ -155,6 +155,167 @@ directory_writer = r'''
     function chNetworkPolicySummary(policy) {
         const p = chNormalizeNetworkPolicy(policy);
         return `${CH_SPEED_LEVELS[p.speedIndex].name} · 每批 ${p.batchSize} · 批间 ${p.batchPauseMinSec}-${p.batchPauseMaxSec} 秒`;
+    }
+
+    // ======================== Shared ChatHarbor Backend Scheduler ========================
+    // Every ChatHarbor control-plane request to /backend-api/ must pass this scheduler.
+    // It serializes requests, applies the selected conservative cadence, shares 429 cooldown
+    // across discovery/detail/attachment-metadata paths, and keeps signed binary downloads
+    // outside the control-plane throttle.
+    const chRawChatHarborFetch = window.fetch.bind(window);
+    const chBackendScheduler = {
+        tail: Promise.resolve(),
+        nextAllowedAt: 0,
+        cooldownUntil: 0,
+        cooldownReason: null,
+        requestCount: 0
+    };
+
+    function chIsBackendControlUrl(resource) {
+        try {
+            const url = resource instanceof Request ? resource.url : String(resource || '');
+            const parsed = new URL(url, location.origin);
+            return parsed.origin === location.origin && parsed.pathname.startsWith('/backend-api/');
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function chBackendPolicy() {
+        return chNormalizeNetworkPolicy(chSyncRun?.active ? chSyncRun.policy : chLoadNetworkPolicy());
+    }
+
+    async function chSchedulerSleep(ms, primary = '', secondary = '', countdown = false) {
+        const duration = Math.max(0, Math.round(Number(ms) || 0));
+        if (!duration) return;
+        if (chSyncRun?.active) {
+            return chControlledSleep(duration, primary || '保守网络等待', secondary, { countdown });
+        }
+        const deadline = Date.now() + duration;
+        while (Date.now() < deadline) {
+            await sleep(Math.min(1000, Math.max(1, deadline - Date.now())));
+        }
+    }
+
+    async function chWithBackendSerial(task) {
+        const previous = chBackendScheduler.tail;
+        let release;
+        chBackendScheduler.tail = new Promise(resolve => { release = resolve; });
+        await previous;
+        try { return await task(); }
+        finally { try { release(); } catch (_) {} }
+    }
+
+    async function chWaitForBackendGate(label = '') {
+        const now = Date.now();
+        const deadline = Math.max(chBackendScheduler.nextAllowedAt || 0, chBackendScheduler.cooldownUntil || 0);
+        if (deadline <= now) {
+            if ((chBackendScheduler.cooldownUntil || 0) <= now) {
+                chBackendScheduler.cooldownUntil = 0;
+                chBackendScheduler.cooldownReason = null;
+            }
+            return;
+        }
+        const waitMs = deadline - now;
+        const is429 = chBackendScheduler.cooldownReason === 'HTTP_429' && chBackendScheduler.cooldownUntil >= deadline;
+        await chSchedulerSleep(
+            waitMs,
+            is429 ? 'API 限流（429）' : '请求间隔',
+            `${label ? `${label} · ` : ''}${is429 ? '全局冷却后继续' : '统一后端请求调度'}`,
+            is429
+        );
+    }
+
+    function chAfterBackendAttempt(policy) {
+        const p = chNormalizeNetworkPolicy(policy);
+        chBackendScheduler.requestCount += 1;
+        let delay = chNetworkDelayMs(p);
+        if (chBackendScheduler.requestCount % p.batchSize === 0) {
+            delay = Math.max(delay, chNetworkBatchPauseMs(p));
+        }
+        chBackendScheduler.nextAllowedAt = Math.max(chBackendScheduler.nextAllowedAt || 0, Date.now() + delay);
+    }
+
+    async function chBackendFetch(resource, options = {}) {
+        if (!chIsBackendControlUrl(resource)) return chRawChatHarborFetch(resource, options);
+        return chWithBackendSerial(async () => {
+            const policy = chBackendPolicy();
+            const maxAttempts = 1 + policy.maxRetries;
+            let lastError = null;
+            let lastResponse = null;
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+                if (chSyncRun?.active) await chControlCheckpoint('backend-request');
+                await chWaitForBackendGate();
+                try {
+                    const response = await chRawChatHarborFetch(resource, options);
+                    lastResponse = response;
+                    chAfterBackendAttempt(policy);
+                    const status = Number(response?.status || 0);
+                    if (status === 429) {
+                        const retryMs = 120000 * Math.max(1, attempt);
+                        chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
+                        chBackendScheduler.cooldownReason = 'HTTP_429';
+                        if (attempt < maxAttempts) {
+                            await chWaitForBackendGate(`第 ${attempt}/${policy.maxRetries} 次重试前`);
+                            continue;
+                        }
+                    } else if (status >= 500 && status <= 599 && attempt < maxAttempts) {
+                        const retryMs = 30000 * Math.max(1, attempt);
+                        chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
+                        chBackendScheduler.cooldownReason = 'HTTP_5XX';
+                        await chSchedulerSleep(retryMs, '网络异常，保守重试等待', `HTTP ${status} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                        continue;
+                    }
+                    return response;
+                } catch (err) {
+                    if (chIsCancellation(err)) throw err;
+                    lastError = err;
+                    chAfterBackendAttempt(policy);
+                    if (attempt >= maxAttempts) break;
+                    const retryMs = 30000 * Math.max(1, attempt);
+                    chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
+                    chBackendScheduler.cooldownReason = 'NETWORK';
+                    await chSchedulerSleep(retryMs, '网络异常，保守重试等待', `第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                }
+            }
+            if (lastResponse) return lastResponse;
+            throw lastError || new Error('ChatHarbor backend request failed');
+        });
+    }
+
+    async function chDataTransferFetch(resource, options = {}) {
+        const policy = chBackendPolicy();
+        const maxAttempts = 1 + policy.maxRetries;
+        let lastError = null;
+        let lastResponse = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            if (chSyncRun?.active) await chControlCheckpoint('binary-transfer');
+            // Respect any global backend 429 cooldown, but do not apply normal control-plane spacing.
+            if ((chBackendScheduler.cooldownUntil || 0) > Date.now()) await chWaitForBackendGate('附件数据下载');
+            try {
+                const response = await chRawChatHarborFetch(resource, options);
+                lastResponse = response;
+                const status = Number(response?.status || 0);
+                if (status === 429) {
+                    const retryMs = 120000 * Math.max(1, attempt);
+                    chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
+                    chBackendScheduler.cooldownReason = 'HTTP_429';
+                    if (attempt < maxAttempts) { await chWaitForBackendGate(`附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`); continue; }
+                } else if (status >= 500 && status <= 599 && attempt < maxAttempts) {
+                    const retryMs = 30000 * Math.max(1, attempt);
+                    await chSchedulerSleep(retryMs, '附件下载网络异常', `HTTP ${status} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                    continue;
+                }
+                return response;
+            } catch (err) {
+                if (chIsCancellation(err)) throw err;
+                lastError = err;
+                if (attempt >= maxAttempts) break;
+                await chSchedulerSleep(30000 * attempt, '附件下载网络异常', `第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+            }
+        }
+        if (lastResponse) return lastResponse;
+        throw lastError || new Error('ChatHarbor binary transfer failed');
     }
 
     const chSyncRun = {
@@ -327,26 +488,8 @@ directory_writer = r'''
     }
 
     async function chGetConversationConservative(id, workspaceId = null) {
-        const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
-        const maxAttempts = 1 + policy.maxRetries;
-        let lastError = null;
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            await chControlCheckpoint('detail-fetch');
-            try {
-                return await getConversation(id, workspaceId);
-            } catch (err) {
-                if (chIsCancellation(err)) throw err;
-                lastError = err;
-                const delay = chRetryDelayMs(err, attempt);
-                if (attempt >= maxAttempts || delay == null) break;
-                await chControlledSleep(
-                    delay,
-                    '网络异常，保守重试等待',
-                    `${id} · 第 ${attempt}/${policy.maxRetries} 次重试前等待 ${Math.round(delay / 1000)} 秒`
-                );
-            }
-        }
-        throw lastError || new Error(`获取对话详情失败: ${id}`);
+        await chControlCheckpoint('detail-fetch');
+        return getConversation(id, workspaceId);
     }
 
     function chUpdateRunControlUi() {
@@ -636,6 +779,8 @@ directory_writer = r'''
         const files = [];
         const sandboxPaths = new Map();
         const usedNames = new Set();
+        const newlyWrittenRootPaths = [];
+        const rootHandle = options.rootHandle || null;
 
         if (references.length === 0) {
             return {
@@ -647,19 +792,30 @@ directory_writer = r'''
                 assetDirPath: null,
                 reusedCount: 0,
                 downloadedNow: 0,
-                missingBefore: 0
+                missingBefore: 0,
+                newlyWrittenRootPaths: []
             };
         }
 
         const folderName = generateUniqueFilename(convData).replace(/\.json$/i, '') + '_files';
-        const missingRefs = backfillPlan.missing;
+        const missingRefs = [...backfillPlan.missing];
+        const verifiedRetained = [];
+        for (const item of backfillPlan.retained) {
+            let reusable = true;
+            if (rootHandle && item.asset?.path) {
+                const meta = await chRelativeFileMeta(rootHandle, item.asset.path);
+                const expectedSize = Number(item.asset?.size_bytes || 0);
+                reusable = Boolean(meta.exists) && !(expectedSize > 0 && meta.size != null && meta.size !== expectedSize);
+            }
+            if (reusable) verifiedRetained.push(item);
+            else missingRefs.push(item.reference);
+        }
         const assetDir = missingRefs.length > 0
             ? await targetDir.getDirectoryHandle(folderName, { create: true })
             : null;
 
-        // Reuse every current-reference asset that the Manifest can identify.  This is the
-        // key incremental-attachment invariant: a backfill downloads only the missing set.
-        for (const item of backfillPlan.retained) {
+        // Reuse only assets whose Manifest identity and physical file both remain valid.
+        for (const item of verifiedRetained) {
             const file = chExistingAssetAsDownloadedFile(item.asset, targetPrefix);
             files.push(file);
             if (file.name) usedNames.add(file.name);
@@ -688,6 +844,7 @@ directory_writer = r'''
 
                 const diskPath = `${folderName}/${filename}`;
                 const rootPath = `${targetPrefix}${diskPath}`;
+                newlyWrittenRootPaths.push(rootPath);
                 const relativePath = encodeRelativePath(diskPath);
 
                 files.push({
@@ -731,7 +888,6 @@ directory_writer = r'''
                 });
             }
 
-            await sleep(150);
         }
 
         const primaryAssetDir = missingRefs.length > 0
@@ -748,7 +904,8 @@ directory_writer = r'''
             reusedCount: retainedCount,
             downloadedNow: files.length - retainedCount,
             attemptedNow: missingRefs.length,
-            missingBefore: missingRefs.length
+            missingBefore: missingRefs.length,
+            newlyWrittenRootPaths
         };
     }
 
@@ -860,7 +1017,7 @@ directory_writer = r'''
                         fraction: 0.15 + ratio * 0.55
                     });
                 },
-                { targetPrefix: relativePrefix, existingRecord }
+                { targetPrefix: relativePrefix, existingRecord, rootHandle }
             );
         } else if (preserveExistingAssets) {
             attachmentResult = existingAttachmentResultOverride || chExistingAttachmentResult(existingRecord);
@@ -981,7 +1138,8 @@ directory_writer = r'''
             attachment_failed: attachmentFailed,
             attachment_failures: preserveExistingAssets ? (existingRecord?.attachment_failures || []) : (attachmentResult?.failures || []),
             attachments_preserved_without_download: Boolean(preserveExistingAssets),
-            synced_at: syncedAt
+            synced_at: syncedAt,
+            __ch_new_asset_paths: attachmentResult?.newlyWrittenRootPaths || []
         };
     }
 
@@ -1347,7 +1505,8 @@ directory_writer = r'''
         }
     }
 
-    async function chScanLocalArchiveReadOnly(rootHandle, onProgress = null) {
+    async function chScanLocalArchiveReadOnly(rootHandle, onProgress = null, options = {}) {
+        const checkAssets = Boolean(options?.checkAssets);
         if (!rootHandle) throw new Error('Directory handle is required');
 
         const manifestResult = await chReadManifestForScan(rootHandle);
@@ -1360,6 +1519,8 @@ directory_writer = r'''
         let ignoredJsonFiles = 0;
         let skippedAssetDirs = 0;
         let trackedFastChecked = 0;
+        let assetFastChecked = 0;
+        let assetIntegrityIssues = 0;
 
         if (manifestResult.error) errors.push({ type:'MANIFEST_ERROR', id:null, path:CH_MANIFEST_NAME, message:manifestResult.error });
 
@@ -1436,6 +1597,21 @@ directory_writer = r'''
                     errors.push({type:'MANIFEST_MARKDOWN_SIZE_MISMATCH',id,path:record.markdown_path,message:`tracked Markdown size ${meta.size} != manifest ${record.markdown_bytes}`});
                 }
             }
+            if (checkAssets && Array.isArray(record?.assets) && record.assets.length) {
+                let missing = 0, sizeMismatch = 0;
+                for (const asset of record.assets) {
+                    if (!asset?.path) { missing++; assetIntegrityIssues++; continue; }
+                    assetFastChecked++;
+                    const meta = await chRelativeFileMeta(rootHandle, asset.path);
+                    if (!meta.exists) { missing++; assetIntegrityIssues++; continue; }
+                    const expectedSize = Number(asset?.size_bytes || 0);
+                    if (expectedSize > 0 && meta.size != null && meta.size !== expectedSize) { sizeMismatch++; assetIntegrityIssues++; }
+                }
+                if (missing || sizeMismatch) {
+                    record.__chAssetIntegrity = { missing, sizeMismatch };
+                    record.attachment_state = 'partial';
+                }
+            }
         }
 
         const duplicateIds = new Set(); const duplicates=[];
@@ -1474,7 +1650,7 @@ directory_writer = r'''
                 archiveLayoutVersion:manifestResult.manifest?chManifestLayoutVersion(manifestResult.manifest):CH_ARCHIVE_LAYOUT_VERSION,
                 provider:manifestResult.manifest?(chManifestProvider(manifestResult.manifest)||CH_PROVIDER):CH_PROVIDER,
                 migrationRequired:Boolean(manifestResult.manifest&&chManifestRequiresLayoutMigration(manifestResult.manifest)),
-                jsonFilesSeen,ignoredJsonFiles,skippedAssetDirs,trackedFastChecked
+                jsonFilesSeen,ignoredJsonFiles,skippedAssetDirs,trackedFastChecked,assetFastChecked,assetIntegrityIssues
             }
         };
     }
@@ -1540,7 +1716,7 @@ directory_writer = r'''
         return {items,localOnly,duplicateIds:Array.from(duplicateIds),duplicateDetails:[...localScan.duplicates,...remoteDuplicates],errors:[...localScan.errors,...remoteErrors],summary:{
             remote:allRemote.length,remoteUnique:remoteById.size,scopeRemote:scopeIds.size,local:localScan.recordsById.size,newCount,remoteUpdateCandidateCount,renameCandidateCount,unchangedCount,metadataCandidateCount,attachmentCandidateCount,rawOnlyVerifyCount,
             localOnlyCount:remoteUniverseComplete?localOnly.length:null,localOnlyReliable:remoteUniverseComplete,remoteUniverseComplete,remoteUniverseNote,duplicateIdCount:duplicateIds.size,
-            errorCount:errorCount+remoteErrors.length+localScan.errors.filter(e=>!e.id).length,maximumFetchRequired,manifestTracked:localScan.stats.manifestTracked,localProjectCount:localScan.stats.manifestProject||0,localRootCount:localScan.stats.manifestRoot||0,archiveLayoutVersion:localScan.stats.archiveLayoutVersion,provider:localScan.stats.provider,migrationRequired:Boolean(localScan.stats.migrationRequired),rawConversationFiles:localScan.stats.rawConversationFiles,rawOnlyIds:localScan.stats.rawOnlyIds,trackedFastChecked:localScan.stats.trackedFastChecked||0
+            errorCount:errorCount+remoteErrors.length+localScan.errors.filter(e=>!e.id).length,maximumFetchRequired,manifestTracked:localScan.stats.manifestTracked,localProjectCount:localScan.stats.manifestProject||0,localRootCount:localScan.stats.manifestRoot||0,archiveLayoutVersion:localScan.stats.archiveLayoutVersion,provider:localScan.stats.provider,migrationRequired:Boolean(localScan.stats.migrationRequired),rawConversationFiles:localScan.stats.rawConversationFiles,rawOnlyIds:localScan.stats.rawOnlyIds,trackedFastChecked:localScan.stats.trackedFastChecked||0,assetFastChecked:localScan.stats.assetFastChecked||0,assetIntegrityIssues:localScan.stats.assetIntegrityIssues||0
         }};
     }
 
@@ -1683,7 +1859,7 @@ directory_writer = r'''
                 `已检查 JSON ${seen} · 识别对话 ${found}${info.path ? ` · ${info.path}` : ''}`,
                 null
             );
-        });
+        }, { checkAssets: true });
         if (localScan.manifest && chManifestRequiresLayoutMigration(localScan.manifest)) {
             throw new Error('Archive Layout v1 需要先执行纯本地 Layout v2 升级。');
         }
@@ -2300,20 +2476,6 @@ directory_writer = r'''
                 });
             }
             fetchIndex++;
-            if (fetchIndex < fetchTotal) {
-                const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
-                if (fetchIndex % policy.batchSize === 0) {
-                    const pauseMs = chNetworkBatchPauseMs(policy);
-                    await chControlledSleep(
-                        pauseMs,
-                        '保守批次暂停',
-                        `已核验 ${fetchIndex}/${fetchTotal}`,
-                        { countdown: true }
-                    );
-                } else {
-                    await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已核验 ${fetchIndex}/${fetchTotal}`);
-                }
-            }
         }
 
         const counts = {};
@@ -2493,8 +2655,20 @@ directory_writer = r'''
             conversationTotal
         });
 
+        const newAssetPaths = Array.isArray(record.__ch_new_asset_paths) ? [...record.__ch_new_asset_paths] : [];
+        delete record.__ch_new_asset_paths;
+        const priorManifestRecord = manifest.conversations?.[record.conversation_id] || null;
         manifest.conversations[record.conversation_id] = record;
-        await writeManifest(rootHandle, manifest);
+        try {
+            await writeManifest(rootHandle, manifest);
+        } catch (err) {
+            if (priorManifestRecord) manifest.conversations[record.conversation_id] = priorManifestRecord;
+            else delete manifest.conversations[record.conversation_id];
+            for (const path of newAssetPaths) {
+                try { await chRemoveTrackedEntry(rootHandle, path, false); } catch (_) {}
+            }
+            throw err;
+        }
 
         const cleanupResult = oldRecord
             ? await cleanup({
@@ -2612,7 +2786,8 @@ directory_writer = r'''
         remoteUniverseNote = null,
         networkPolicy = null,
         onItemClassified = null,
-        onItemCommitted = null
+        onItemCommitted = null,
+        onItemFailed = null
     }) {
         const selected = selectedIds instanceof Set && selectedIds.size > 0 ? selectedIds : null;
         if (!selected && !remoteUniverseComplete) {
@@ -2624,7 +2799,7 @@ directory_writer = r'''
 
         chSetProgress('目录同步', `扫描本地档案… · ${chNetworkPolicySummary(chSyncRun.policy)}`, 0);
         await chControlCheckpoint('local-scan');
-        const localScan = await chScanLocalArchiveReadOnly(rootHandle);
+        const localScan = await chScanLocalArchiveReadOnly(rootHandle, null, { checkAssets: true });
         if (localScan.manifestExists && !localScan.manifestReadable) {
             throw new Error(`${CH_MANIFEST_NAME} 不可读或不兼容，已停止同步以避免覆盖。`);
         }
@@ -2741,25 +2916,12 @@ directory_writer = r'''
                             action: classified.finalAction,
                             error: err?.message || String(err)
                         });
+                        if (typeof onItemFailed === 'function') {
+                            try { onItemFailed(classified, err); } catch (_) {}
+                        }
                     }
                 }
 
-                // One conservative network cadence governs the next detail request.  This runs
-                // after the current conversation has been fully classified and atomically committed.
-                if (item.needs_detail_fetch && fetchIndex < fetchTotal) {
-                    const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
-                    if (fetchIndex % policy.batchSize === 0) {
-                        const pauseMs = chNetworkBatchPauseMs(policy);
-                        await chControlledSleep(
-                            pauseMs,
-                            '保守批次暂停',
-                            `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`,
-                            { countdown: true }
-                        );
-                    } else {
-                        await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`);
-                    }
-                }
             } catch (err) {
                 if (chIsCancellation(err)) {
                     verification.cancelled = true;
@@ -3091,9 +3253,9 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.11.4 Attachment Incremental Hotfix on Incremental Convergence ========================
-# The sync/runtime core above remains unchanged. This final bounded patch replaces only the
-# picker presentation, report presentation, and launcher presentation.
+# ======================== ChatHarbor 0.0.12.0 Network/State Convergence Release ========================
+# This release closes cross-cutting runtime gaps across network scheduling, remote refresh
+# snapshot freezing, physical attachment integrity, commit-accurate status and presentation.
 
 # Locale helper for ChatHarbor-owned UI/report strings.
 locale_anchor = "    const CH_SIGNATURE_VERSION = 'sha256-current_node+mapping-v1';\n"
@@ -3186,7 +3348,8 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             lastResult: null, syncStatusById: new Map(), lastSelectedIndex: null,
             remoteUniverse: [], remoteUniverseComplete: false, remoteUniverseNote: null,
             accountUniverse: null, accountUniverseComplete: false, accountUniverseNote: null,
-            accountLoadedAt: null, teamUniverseCache: new Map(), remoteCacheMeta: null
+            accountLoadedAt: null, teamUniverseCache: new Map(), remoteCacheMeta: null,
+            remoteRefreshPromise: null, pendingRemoteSnapshot: null, remoteRefreshGeneration: 0, remoteAppliedValidatedAt: 0
         };
 
         const statusLabel = value => ({
@@ -3435,6 +3598,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                 const first = `${chT('本地','Local')} ${s.local || 0}（${chT('项目内','in projects')} ${localProject} · ${chT('项目外','outside projects')} ${localRoot}）`;
                 const second = [`${chT('新增','New')} ${s.newCount || 0}`, `${chT('待核验','Verify')} ${verifyCount}`];
                 if (s.unchangedCount) second.push(`${chT('已同步','Synced')} ${s.unchangedCount}`);
+                if (s.assetIntegrityIssues) second.push(`${chT('附件缺失/异常','Attachment issues')} ${s.assetIntegrityIssues}`);
                 if (s.errorCount || s.duplicateIdCount) second.push(`${chT('异常','Issues')} ${(s.errorCount||0)+(s.duplicateIdCount||0)}`);
                 $('ch-archive-summary').textContent = `${first} · ${second.join(' · ')}`;
             }
@@ -3518,7 +3682,14 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             state.lastPlan=plan;
         };
         const applyFinalStatuses = result => {
-            for(const item of result.verification.items||[]){if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction==='OBSERVATION_ONLY'?'UNCHANGED':item.finalAction==='ATTACHMENT_BACKFILL'?'UNCHANGED':item.finalAction);}
+            const failedIds=new Set((result.sync?.failures||[]).map(x=>x.id));
+            const committedIds=new Set((result.sync?.results||[]).map(x=>x.id));
+            for(const item of result.verification.items||[]){
+                if(!item.id||!item.finalAction)continue;
+                if(failedIds.has(item.id)){state.syncStatusById.set(item.id,'ERROR');continue;}
+                if(CH_FINAL_SYNC_ACTIONS.has(item.finalAction)&&!committedIds.has(item.id))continue;
+                state.syncStatusById.set(item.id,item.finalAction==='OBSERVATION_ONLY'?'UNCHANGED':item.finalAction==='ATTACHMENT_BACKFILL'?'UNCHANGED':item.finalAction);
+            }
             state.lastPlan=result.plan;state.lastResult=result;
         };
         const ensureRoot = async () => {
@@ -3530,14 +3701,30 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         const currentWorkspaceForRemote = () => state.mode==='team' ? state.workspaceId : null;
         const applyRemoteSnapshot = snapshot => {
             const list=decorateProjectKnowledge(snapshot?.list||[],snapshot?.complete===true);
-            state.remoteUniverse=list;state.remoteUniverseComplete=snapshot?.complete===true;state.remoteUniverseNote=snapshot?.note||null;state.remoteCacheMeta={validatedAt:snapshot?.validatedAt||0,fullFetchedAt:snapshot?.fullFetchedAt||0,refreshMode:snapshot?.refreshMode||'cache'};
+            state.remoteUniverse=list;state.remoteUniverseComplete=snapshot?.complete===true;state.remoteUniverseNote=snapshot?.note||null;state.remoteCacheMeta={validatedAt:snapshot?.validatedAt||0,fullFetchedAt:snapshot?.fullFetchedAt||0,refreshMode:snapshot?.refreshMode||'cache'};state.remoteAppliedValidatedAt=Math.max(Number(state.remoteAppliedValidatedAt||0),Number(snapshot?.validatedAt||0));
             if(state.mode==='team'){state.list=list;return;}
             state.accountUniverse=list;state.accountUniverseComplete=state.remoteUniverseComplete;state.accountUniverseNote=state.remoteUniverseNote;state.accountLoadedAt=state.remoteCacheMeta.validatedAt||Date.now();
             state.list=state.mode==='project'?list.filter(item=>item.projectId||item.projectTitle):list;
         };
+        const applyRemoteSnapshotSafely = async snapshot => {
+            if(Number(snapshot?.validatedAt||0)<=Number(state.remoteAppliedValidatedAt||0))return false;
+            if(chSyncRun.active){state.pendingRemoteSnapshot=snapshot;return false;}
+            applyRemoteSnapshot(snapshot);renderAll();if(state.rootHandle)await runPreflight(true);return true;
+        };
         const ensureTeamWorkspace = () => {
             if(state.mode!=='team')return;
             if(!state.workspaceId){const ids=detectAllWorkspaceIds();if(ids.length===0)throw new Error(chT('未检测到 Team Workspace ID，请先打开一个团队对话后再试。','No Team Workspace ID detected. Open a team conversation first.'));state.workspaceId=ids[0];}
+        };
+        const startRemoteRefresh = async (ws, options={}) => {
+            if(state.remoteRefreshPromise)return state.remoteRefreshPromise;
+            const generation=++state.remoteRefreshGeneration;
+            const task=(async()=>{
+                const snapshot=await chRefreshRemoteIndex(ws,options);
+                if(generation!==state.remoteRefreshGeneration)return snapshot;
+                return snapshot;
+            })();
+            state.remoteRefreshPromise=task;
+            try{return await task;}finally{if(state.remoteRefreshPromise===task)state.remoteRefreshPromise=null;}
         };
         const loadRemoteList = async (force=false, forceFull=false) => {
             state.loading=true;state.syncStatusById.clear();state.lastPlan=null;renderList();
@@ -3547,19 +3734,26 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                     const cached=await chRemoteCacheGet(ws);
                     if(cached?.complete&&Array.isArray(cached.list)&&cached.list.length){
                         applyRemoteSnapshot({...cached,refreshMode:'persistent-cache'}); state.loading=false; renderAll(); if(state.rootHandle)await runPreflight(true);
-                        // Validate the head in the background; only a changed head or periodic expiry triggers a full refresh.
-                        void (async()=>{try{const fresh=await chRefreshRemoteIndex(ws);applyRemoteSnapshot(fresh);renderAll();if(state.rootHandle)await runPreflight(true);}catch(err){console.warn('[ChatHarbor] background remote refresh failed',err);}})();
+                        // Background validation is single-flight.  It may finish while the user starts sync;
+                        // in that case ensureRemoteFreshForSync awaits it before the run snapshot is frozen.
+                        void (async()=>{try{const fresh=await startRemoteRefresh(ws);await applyRemoteSnapshotSafely(fresh);}catch(err){console.warn('[ChatHarbor] background remote refresh failed',err);}})();
                         return;
                     }
                 }
-                const snapshot=await chRefreshRemoteIndex(ws,{forceFull:Boolean(forceFull)}); applyRemoteSnapshot(snapshot); state.loading=false; renderAll(); if(state.rootHandle)await runPreflight(true);
+                const snapshot=await startRemoteRefresh(ws,{forceFull:Boolean(forceFull)}); applyRemoteSnapshot(snapshot); state.loading=false; renderAll(); if(state.rootHandle)await runPreflight(true);
             }catch(err){state.loading=false;if(!state.remoteUniverse.length){state.list=[];state.filtered=[];state.remoteUniverse=[];}$('conv-status').textContent=`${chT('加载失败','Load failed')}: ${err.message}`;renderList();}
         };
         const ensureRemoteFreshForSync = async () => {
-            ensureTeamWorkspace(); const ws=currentWorkspaceForRemote(); const age=Date.now()-Number(state.remoteCacheMeta?.validatedAt||0);
+            ensureTeamWorkspace(); const ws=currentWorkspaceForRemote();
+            // A background refresh started from cached UI must complete before we freeze this run.
+            if(state.remoteRefreshPromise){
+                chSetProgress(chT('刷新远端索引','Refreshing remote index'),chT('等待正在进行的远端快速刷新完成…','Waiting for the active remote refresh…'),0);
+                const snapshot=await state.remoteRefreshPromise;if(Number(snapshot?.validatedAt||0)>Number(state.remoteAppliedValidatedAt||0)){applyRemoteSnapshot(snapshot);renderAll();if(state.rootHandle)await runPreflight(true);}
+            }
+            const age=Date.now()-Number(state.remoteCacheMeta?.validatedAt||0);
             if(state.remoteUniverseComplete&&age>=0&&age<=CH_REMOTE_SYNC_FRESH_MS)return;
             chSetProgress(chT('刷新远端索引','Refreshing remote index'),chT('同步前确认最新列表；无变化时只检查最新窗口。','Confirming the latest remote index; stable heads stop early.'),0);
-            const keep=new Set(state.selected); const snapshot=await chRefreshRemoteIndex(ws); applyRemoteSnapshot(snapshot);
+            const keep=new Set(state.selected); const snapshot=await startRemoteRefresh(ws); applyRemoteSnapshot(snapshot);
             state.selected.clear(); for(const id of keep)if(state.remoteUniverse.some(item=>item.id===id))state.selected.add(id); renderAll(); if(state.rootHandle)await runPreflight(true);
         };
         const runPreflight = async (automatic=false) => {
@@ -3630,9 +3824,9 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                 const launcher=getExportButton(); launcher.classList.add('gre-busy'); const launcherPill=document.getElementById('gre-fab-status'); if(launcherPill)launcherPill.classList.remove('gre-visible');
                 renderList();chSetProgress(chT('目录同步','Directory sync'),`${chT('按实际待处理范围开始流式核验与写入…','Starting streaming verify + commit for actionable items…')} · ${chNetworkPolicySummary(chSyncRun.policy)}`,0);
                 const remote=state.remoteUniverse.length?state.remoteUniverse:state.list;
-                const result=await chRunIntegratedDirectorySync({rootHandle:root,remoteList:remote,selectedIds,workspaceId:state.workspaceId,includeAttachments:state.runSettings.includeAttachments,remoteUniverseComplete:state.remoteUniverseComplete,remoteUniverseNote:state.remoteUniverseNote,networkPolicy:chSyncRun.policy,onItemClassified:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction==='OBSERVATION_ONLY'?'UNCHANGED':item.finalAction==='ATTACHMENT_BACKFILL'?'UNCHANGED':item.finalAction);renderList();},onItemCommitted:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction==='OBSERVATION_ONLY'?'UNCHANGED':item.finalAction==='ATTACHMENT_BACKFILL'?'UNCHANGED':item.finalAction);}});
+                const result=await chRunIntegratedDirectorySync({rootHandle:root,remoteList:remote,selectedIds,workspaceId:state.workspaceId,includeAttachments:state.runSettings.includeAttachments,remoteUniverseComplete:state.remoteUniverseComplete,remoteUniverseNote:state.remoteUniverseNote,networkPolicy:chSyncRun.policy,onItemClassified:(item)=>{if(item.id&&item.finalAction==='ERROR'){state.syncStatusById.set(item.id,'ERROR');renderList();}},onItemCommitted:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction==='OBSERVATION_ONLY'?'UNCHANGED':item.finalAction==='ATTACHMENT_BACKFILL'?'UNCHANGED':item.finalAction);renderList();},onItemFailed:(item)=>{if(item.id){state.syncStatusById.set(item.id,'ERROR');renderList();}}});
                 applyFinalStatuses(result);renderAll();
-            }catch(err){if(chIsCancellation(err))chSetProgress(chT('目录同步已取消','Sync cancelled'),chT('已在安全边界停止；已提交会话保留。','Stopped at a safe boundary; committed conversations were kept.'),100);else{console.error('[ChatHarbor] sync failed',err);chSetProgress(chT('目录同步失败','Sync failed'),err?.message||String(err),100);}}finally{const launcher=getExportButton();launcher.classList.remove('gre-busy','gre-progress');const launcherPill=document.getElementById('gre-fab-status');if(launcherPill)launcherPill.classList.remove('gre-visible');fabScheduleCollapse(launcher);chEndControlledRun();state.runSettings=null;renderList();}
+            }catch(err){if(chIsCancellation(err))chSetProgress(chT('目录同步已取消','Sync cancelled'),chT('已在安全边界停止；已提交会话保留。','Stopped at a safe boundary; committed conversations were kept.'),100);else{console.error('[ChatHarbor] sync failed',err);chSetProgress(chT('目录同步失败','Sync failed'),err?.message||String(err),100);}}finally{const launcher=getExportButton();launcher.classList.remove('gre-busy','gre-progress');const launcherPill=document.getElementById('gre-fab-status');if(launcherPill)launcherPill.classList.remove('gre-visible');fabScheduleCollapse(launcher);chEndControlledRun();state.runSettings=null;const deferred=state.pendingRemoteSnapshot;state.pendingRemoteSnapshot=null;if(deferred){applyRemoteSnapshot(deferred);renderAll();if(state.rootHandle)await runPreflight(true);}else{renderList();}}
         };
 
         searchInput.oninput=e=>{state.query=e.target.value||'';applyFilters();renderList();};
@@ -3729,7 +3923,7 @@ preflight_report_block = r'''    function chPreflightReportText(plan) {
             `${chT('重复ID','duplicate IDs')}: ${s.duplicateIdCount}`,
             `${chT('错误','ERROR')}: ${s.errorCount}`,
             `${chT('最多需要抓取详情','maximum fetch required')}: ${s.maximumFetchRequired}`,
-            '', `${chT('Manifest 跟踪','Manifest tracked')}: ${s.manifestTracked}`, `${chT('Manifest 快检','Manifest fast-checked')}: ${s.trackedFastChecked||0}`, `${chT('原始对话 JSON','Raw conversation JSON files')}: ${s.rawConversationFiles}`, `${chT('仅原始文件 ID','Raw-only IDs')}: ${s.rawOnlyIds}`
+            '', `${chT('Manifest 跟踪','Manifest tracked')}: ${s.manifestTracked}`, `${chT('Manifest 快检','Manifest fast-checked')}: ${s.trackedFastChecked||0}`, `${chT('附件路径快检','Asset fast-check')}: ${s.assetFastChecked||0}`, `${chT('附件缺失/异常','Attachment issues')}: ${s.assetIntegrityIssues||0}`, `${chT('原始对话 JSON','Raw conversation JSON files')}: ${s.rawConversationFiles}`, `${chT('仅原始文件 ID','Raw-only IDs')}: ${s.rawOnlyIds}`
         ];
         if (plan.errors.length) {
             lines.push('', `=== ${chT('扫描错误','SCAN ERRORS')} (${plan.errors.length}) ===`);
@@ -3798,6 +3992,13 @@ integrated_report_block = r'''    function chIntegratedSyncReportText(result) {
 '''
 text = text[:integrated_text_start] + integrated_report_block + text[integrated_run_start:]
 
+# Route every ChatHarbor/upstream control-plane /backend-api/ fetch through the shared scheduler.
+# Signed binary fetches use parsedUrl.href and intentionally remain direct data-transfer requests.
+text = text.replace("await fetch(`/backend-api/", "await chBackendFetch(`/backend-api/")
+text = text.replace("await fetch(metadataUrl, { credentials: 'include', headers })", "await chBackendFetch(metadataUrl, { credentials: 'include', headers })")
+text = text.replace("await fetch(parsedUrl.href, sameOrigin", "await chDataTransferFetch(parsedUrl.href, sameOrigin")
+text = text.replace("if(hasMore)await sleep(jitter());", "")
+
 # Runtime markers for the desktop workspace must be present in the generated userscript.
 
 # Build-time UI/runtime invariants: fail closed instead of generating a script with no visible entry.
@@ -3814,6 +4015,13 @@ required_runtime_markers = [
     "CH_SPEED_LEVELS",
     "chBeginControlledRun",
     "chGetConversationConservative",
+    "async function chBackendFetch",
+    "async function chDataTransferFetch",
+    "const chBackendScheduler",
+    "remoteRefreshPromise",
+    "pendingRemoteSnapshot",
+    "assetFastChecked",
+    "onItemFailed",
     "id=\"ch-space-select\"",
     "id=\"select-all-checkbox\"",
     "id=\"ch-result-panel\"",
@@ -3828,11 +4036,15 @@ required_runtime_markers = [
     "function chInferLegacyAttachmentState",
     "function chPlanAttachmentBackfill",
     "Progress is completion-based and monotonic",
+    "Reuse only assets whose Manifest identity and physical file both remain valid",
 ]
 missing_runtime_markers = [marker for marker in required_runtime_markers if marker not in text]
 if missing_runtime_markers:
     raise SystemExit("Generated runtime invariant failed; missing: " + ", ".join(missing_runtime_markers))
 forbidden_runtime_markers = [
+    "fetch(`/backend-api/",
+    "fetch(metadataUrl, { credentials: 'include', headers })",
+    "fetch(parsedUrl.href, sameOrigin",
     "ch-integrated-sync-report-overlay",
     "ch-preflight-report-overlay",
     "id=\"sync-filtered-btn\"",

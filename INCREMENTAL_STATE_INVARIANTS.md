@@ -1,4 +1,4 @@
-# ChatHarbor Incremental State Invariants — 0.0.11.0
+# ChatHarbor Incremental State Invariants — 0.0.12.0
 
 These invariants define the correctness boundary for incremental synchronization.
 
@@ -84,3 +84,20 @@ failed/missing attachment references remain PARTIAL and are retryable
 ```
 
 A legacy record is inferred `complete` only when it has a positive `attachment_detected`, zero failures, downloaded count covering the detected count, and at least that many tracked assets. A zero legacy count is deliberately not interpreted as `none` unless there is an explicit later `attachments_checked_at` fact.
+
+## Runtime horizontal invariants (0.0.12.0)
+
+### I-11 — Network policy is horizontal
+Every ChatHarbor `/backend-api/` control-plane request uses one shared serialized scheduler. A 429 creates one global cooldown shared by discovery, project enumeration, detail verification and attachment metadata. Signed/direct binary transfer is a separate data path, but its 429 also advances the global cooldown.
+
+### I-12 — Classification is not commit
+A predicted `finalAction` is not a successful sync fact. UI state may become committed only after the corresponding file/Manifest transaction succeeds. Commit failure must remain visible as an error.
+
+### I-13 — Manifest asset identity requires physical evidence
+A Manifest-tracked attachment is reusable only when the tracked path still exists and, when an expected byte size is known, the physical size matches. Missing/mismatched assets are repair candidates rather than silently trusted Manifest facts.
+
+### I-14 — Active-run remote observation is immutable
+A sync run freezes one remote snapshot. Background/cache refresh may not replace that snapshot, rerun Preflight against changing state, or alter visible run facts until the run ends.
+
+### I-15 — Newly written attachment residue is not authoritative
+Attachments written during a conversation transaction are not authoritative until Manifest commit succeeds. If Manifest commit fails, newly created attachment paths are removed best-effort and the prior in-memory Manifest record is restored.

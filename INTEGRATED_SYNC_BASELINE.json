@@ -1,6 +1,6 @@
 {
   "product": "ChatHarbor",
-  "build": "Incremental Convergence + Manifest-first Local Index + Cached Remote Index + Archive Layout v2",
+  "build": "Runtime Convergence + Shared Backend Scheduler + Commit-accurate State + Incremental Attachments + Cached Remote Index + Archive Layout v2",
   "status": "AUTOMATED_REGRESSION_PASS_REAL_UI_AND_LIVE_ENDPOINT_SMOKE_REQUIRED",
   "date": "2026-09-15",
   "clean_upstream": {
@@ -77,7 +77,15 @@
     "preflight no longer forces the UI into the aggregate pending filter",
     "legacy positive attachment evidence can infer complete/partial without a redundant detail verification",
     "attachment backfill reuses Manifest-tracked current-reference assets and downloads only missing references",
-    "attachment progress is completion-based and monotonic; one counter advance per attachment attempt"
+    "attachment progress is completion-based and monotonic; one counter advance per attachment attempt",
+    "shared serialized backend scheduler covers remote lists, project enumeration, conversation detail and attachment metadata",
+    "global HTTP 429 cooldown shared across ChatHarbor backend-control request paths",
+    "signed/direct attachment binary transfer uses separate retry path and propagates 429 cooldown without normal control-plane spacing",
+    "remote refresh is single-flight; active run freezes remote snapshot and defers later refresh application",
+    "visible synchronization state is commit-accurate; classification alone cannot mark an actionable item as synchronized",
+    "Manifest-first scan quick-checks tracked attachment files for existence/size and downgrades missing/mismatched assets to partial",
+    "attachment reuse requires both Manifest identity and physical-file validity",
+    "newly written attachment paths are best-effort cleaned if Manifest commit fails"
   ],
   "explicitly_not_in_this_stage": [
     "full localization of every inherited upstream string outside ChatHarbor-owned UI",
@@ -96,7 +104,7 @@
     "remote_absence_requires_complete_universe": true,
     "remote_list_checkpoint": "remote_list_* Manifest observation fields"
   },
-  "integrated_build_version": "0.0.11.4",
+  "integrated_build_version": "0.0.12.0",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,
@@ -104,13 +112,16 @@
       180,
       300
     ],
-    "pause_semantics": "explicit user pause never auto-resumes; no new detail request or conversation transaction begins while paused",
+    "pause_semantics": "explicit user pause never auto-resumes; shared backend scheduler starts no new ChatHarbor control request while paused",
     "cancel_semantics": "stop at safe boundary; completed per-conversation commits remain authoritative",
     "sleep_semantics": "conservative waits use absolute Date.now() deadlines; elapsed OS sleep counts; wake adds normal request jitter",
     "remote_index_fast_head_per_source": 20,
     "remote_index_periodic_full_seconds": 86400,
     "remote_index_sync_fresh_seconds": 120,
-    "remote_index_cache": "IndexedDB; disposable acceleration data; complete snapshots only persisted"
+    "remote_index_cache": "IndexedDB; disposable acceleration data; complete snapshots only persisted",
+    "network_scheduler": "single serialized ChatHarbor /backend-api control-plane gate; selected policy applies horizontally",
+    "global_429_cooldown": "120s × retry attempt, shared across discovery/detail/attachment-metadata paths",
+    "binary_transfer": "separate data-transfer retry path; no ordinary control-plane pacing, but 429 advances global cooldown"
   },
   "ui": {
     "layout": "Desktop-first single-page workspace",
@@ -132,5 +143,5 @@
     "refresh": "normal click = fast newest-window validation; Shift+click = force complete refresh",
     "preflight_status_visibility": "does not auto-switch to pending; first-stage UNCHANGED / NEW / VERIFY remain directly observable"
   },
-  "core_literal_sha256": "e084df4e11a3fb2bd5a70c16710569665c555d1b8d7bc71eb1523e09af26a810"
+  "core_literal_sha256": "0a7debfae931cddf7cc8d1617c90e8a90910cc4c94823495d5cfe0dd48247b66"
 }
