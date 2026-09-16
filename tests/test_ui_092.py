@@ -36,6 +36,12 @@ for marker in [
     'id="ch-pause-sync-btn"',
     'id="ch-cancel-sync-btn"',
     'id="ch-result-panel"',
+    'id="ch-action-bar"',
+    'id="ch-archive-copy-report-btn"',
+    "chT('全部对话','All conversations')",
+    "chT('项目对话','Project conversations')",
+    'accountUniverse',
+    "chT('待处理','To process')",
     "archived: 'all'",
     "__chProjectState",
     "decorateProjectKnowledge",
@@ -82,12 +88,12 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.9.1' in source
+assert '0.0.9.2' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';" in source
 assert 'background: #10a37f;' in source
 assert 'fabCollapseTimer = setTimeout' in source
 assert '复制详细报告' in values['inline_report_helpers']
-assert '本地扫描完成' in values['preflight_report_block']
+assert 'ch-archive-copy-report-btn' in values['preflight_report_block']
 assert 'ch-integrated-sync-report-overlay' not in values['integrated_report_block']
 assert 'ch-preflight-report-overlay' not in values['preflight_report_block']
 
@@ -97,6 +103,18 @@ for name in ['directory_writer','single_page_picker','inline_report_helpers','pr
         f.write(values[name])
         path = f.name
     subprocess.run(['node','--check',path],check=True,capture_output=True,text=True)
+
+
+assert "spaceSelect.onchange=async e=>" in picker
+assert "await loadAccountUniverse(false)" in picker
+assert "await loadRemoteList();" not in picker.split("spaceSelect.onchange=async e=>",1)[1].split("projectSelect.onchange",1)[0]
+assert "loadRemoteList(true)" in picker
+assert "state.list = state.mode === 'project' ? all.filter(item => item.projectId || item.projectTitle) : all;" in picker
+assert "const verifyCount = Math.max(0, (s.maximumFetchRequired || 0) - (s.newCount || 0));" in picker
+assert "ch-result-panel" not in values['preflight_report_block'] or "style.display = 'none'" in values['preflight_report_block']
+print('PASS cached canonical account index + local all/project scope switching')
+print('PASS compact archive summary + sticky action rail markers')
+print('PASS pending label refined to To process / 待处理')
 
 print('PASS injected JavaScript syntax')
 print('PASS single selection scope + tri-state select-all')

@@ -2,6 +2,23 @@
 
 This changelog records user-visible behavior and important runtime/safety changes. Fine-grained implementation history should remain in Git commits; GitHub Release notes can summarize each stable milestone.
 
+## 0.0.9.2 — 2026-09-14
+
+### Changed
+- The account-level remote conversation universe is loaded once and cached in memory. Switching between `All conversations` and `Project conversations` now filters the canonical index locally instead of repeating the same remote discovery.
+- Renamed the former `Personal` scope to `All conversations` because the canonical account index includes both project and non-project conversations.
+- `Refresh` remains the explicit action that re-fetches remote metadata. Team/workspace data remains a separate remote universe and may require its own load.
+- Renamed the aggregate sync filter from `Pending / 待同步` to `To process / 待处理`, because `VERIFY` candidates are not yet proven to require a disk write.
+- Compact local archive summary now shows `Local / New / Verify` counts in one card.
+- Read-only preflight completion no longer creates a separate large result card; detailed scan text is available from a small `Details` action in the local archive card.
+- The right rail is split into a scrollable information area and a fixed bottom primary action, keeping `Sync selected N` visible at all times.
+- Network policy and sync-content sections remain collapsed by default.
+
+### Safety
+- Canonical account-index caching does not bypass explicit `Refresh`; project/archive metadata changes become visible after refresh.
+- Local archive scan / Plan remains read-only.
+- Manifest, streaming atomic sync, LOCAL_ONLY protection, tracked-only cleanup, conservative pacing, pause/cancel and batch countdown invariants are unchanged.
+
 ## 0.0.9.1 — 2026-09-14
 
 ### Changed

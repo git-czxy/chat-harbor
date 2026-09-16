@@ -35,7 +35,7 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.9.1\n"
+    "// @version      0.0.9.2\n"
     "// @description  Clean-lineage archive sync with conservative pacing, pause/cancel, and version-aware selective directory sync.\n"
     "// @description:zh-CN 干净来源的本地档案同步：保守节奏、暂停/取消、版本识别与选择性目录同步。\n"
     "// @author       huhu; ChatHarbor contributors\n"
@@ -2729,7 +2729,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.9.1 Desktop Workspace + Streaming Sync UI ========================
+# ======================== ChatHarbor 0.0.9.2 Cached Remote Index + Compact Rail UI ========================
 # The sync/runtime core above remains unchanged. This final bounded patch replaces only the
 # picker presentation, report presentation, and launcher presentation.
 
@@ -2821,10 +2821,12 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             loading: true, pageSize: 100, visibleCount: 100, includeAttachments: initialAttachments,
             networkPolicy: chLoadNetworkPolicy(), rootHandle: null, localScan: null, lastPlan: null,
             lastResult: null, syncStatusById: new Map(), lastSelectedIndex: null,
-            remoteUniverse: [], remoteUniverseComplete: false, remoteUniverseNote: null
+            remoteUniverse: [], remoteUniverseComplete: false, remoteUniverseNote: null,
+            accountUniverse: null, accountUniverseComplete: false, accountUniverseNote: null,
+            accountLoadedAt: null, teamUniverseCache: new Map()
         };
 
-        const modeLabel = value => value === 'team' ? chT('团队空间','Team workspace') : value === 'project' ? chT('项目空间','Projects') : chT('个人空间','Personal');
+        const modeLabel = value => value === 'team' ? chT('团队空间','Team workspace') : value === 'project' ? chT('项目对话','Project conversations') : chT('全部对话','All conversations');
         const statusLabel = value => ({
             NEW: chT('新增','New'), VERIFY: chT('待核验','Verify'), UPDATED: chT('内容更新','Updated'),
             RENAMED_ONLY: chT('仅改名','Renamed'), UPDATED_AND_RENAMED: chT('更新+改名','Updated + renamed'),
@@ -2858,7 +2860,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             <div style="padding:10px 14px; border-bottom:1px solid #e5e7eb; display:grid; grid-template-columns:minmax(260px,1fr) 118px 150px 120px 150px 118px; gap:8px; align-items:center; flex:0 0 auto;">
                 <input id="conv-search" type="text" placeholder="${chT('搜索标题/项目名/ID','Search title/project/ID')}" style="min-width:0; padding:8px 10px; border:1px solid #d1d5db; border-radius:7px;">
                 <select id="ch-space-select" style="padding:8px; border:1px solid #d1d5db; border-radius:7px; background:#fff;">
-                    <option value="personal">${chT('个人空间','Personal')}</option><option value="project">${chT('项目空间','Projects')}</option><option value="team">${chT('团队空间','Team')}</option>
+                    <option value="personal">${chT('全部对话','All conversations')}</option><option value="project">${chT('项目对话','Project conversations')}</option><option value="team">${chT('团队空间','Team')}</option>
                 </select>
                 <select id="filter-project" style="padding:8px; border:1px solid #d1d5db; border-radius:7px; background:#fff;"><option value="all">${chT('项目：全部','Project: all')}</option></select>
                 <select id="filter-archived" style="padding:8px; border:1px solid #d1d5db; border-radius:7px; background:#fff;">
@@ -2888,38 +2890,40 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                     </div>
                     <div id="conv-list" style="flex:1 1 auto; min-height:0; overflow:auto; border:1px solid #e5e7eb; border-radius:9px; padding:8px; background:#fff;"></div>
                 </section>
-                <aside style="min-height:0; overflow:auto; display:flex; flex-direction:column; gap:9px;">
-                    <div style="padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
-                        <strong style="font-size:13px;">${chT('本地归档','Local archive')}</strong>
-                        <div id="ch-archive-path" style="margin-top:6px; font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${chT('尚未选择目录','No directory selected')}</div>
-                        <div id="ch-archive-summary" style="margin-top:6px; font-size:12px; line-height:1.6; color:#4b5563;">${chT('等待选择目录','Waiting for directory')}</div>
-                        <div style="display:flex; gap:6px; margin-top:8px;"><button id="ch-choose-directory-btn" style="flex:1; padding:7px 8px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer;">${chT('选择目录','Choose')}</button><button id="preflight-plan-btn" style="flex:1; padding:7px 8px; border:1px solid #6366f1; border-radius:6px; background:#fff; color:#4338ca; cursor:pointer; font-weight:600;">${chT('重新扫描本地','Rescan local')}</button></div>
-                    </div>
-                    <details style="padding:9px 10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;" open>
-                        <summary id="ch-network-policy-summary" style="cursor:pointer; font-size:13px; font-weight:600;">${chT('网络策略','Network policy')} · ${chNetworkPolicySummary(state.networkPolicy)}</summary>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px;">
-                            <label style="font-size:11px;color:#6b7280;grid-column:1/-1;">${chT('速度','Speed')}<select id="ch-speed-level" style="width:100%;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;">${CH_SPEED_LEVELS.map((x,i)=>`<option value="${i}" ${i===state.networkPolicy.speedIndex?'selected':''}>${x.name}</option>`).join('')}</select></label>
-                            <label style="font-size:11px;color:#6b7280;">${chT('每批','Batch')}<input id="ch-batch-size" type="number" min="1" max="200" value="${state.networkPolicy.batchSize}" style="width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;"></label>
-                            <span></span>
-                            <label style="font-size:11px;color:#6b7280;">${chT('暂停最小(秒)','Pause min(s)')}<input id="ch-pause-min" type="number" min="0" max="3600" value="${state.networkPolicy.batchPauseMinSec}" style="width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;"></label>
-                            <label style="font-size:11px;color:#6b7280;">${chT('暂停最大(秒)','Pause max(s)')}<input id="ch-pause-max" type="number" min="0" max="3600" value="${state.networkPolicy.batchPauseMaxSec}" style="width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;"></label>
+                <aside style="min-height:0; overflow:hidden; display:flex; flex-direction:column; gap:9px;">
+                    <div id="ch-right-scroll" style="min-height:0; flex:1 1 auto; overflow:auto; display:flex; flex-direction:column; gap:9px; padding-right:1px;">
+                        <div style="padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
+                            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong style="font-size:13px;">${chT('本地归档','Local archive')}</strong><button id="ch-archive-copy-report-btn" style="display:none;padding:3px 7px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#6b7280;cursor:pointer;font-size:11px;">${chT('详细信息','Details')}</button></div>
+                            <div id="ch-archive-path" style="margin-top:6px; font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${chT('尚未选择目录','No directory selected')}</div>
+                            <div id="ch-archive-summary" style="margin-top:6px; font-size:12px; line-height:1.55; color:#4b5563;">${chT('等待选择目录','Waiting for directory')}</div>
+                            <div style="display:flex; gap:6px; margin-top:8px;"><button id="ch-choose-directory-btn" style="flex:1; padding:7px 8px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer;">${chT('选择目录','Choose')}</button><button id="preflight-plan-btn" style="flex:1; padding:7px 8px; border:1px solid #6366f1; border-radius:6px; background:#fff; color:#4338ca; cursor:pointer; font-weight:600;">${chT('重新扫描本地','Rescan local')}</button></div>
                         </div>
-                    </details>
-                    <details style="padding:9px 10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
-                        <summary style="cursor:pointer; font-size:13px; font-weight:600;">${chT('同步内容','Sync content')}</summary>
-                        <label style="display:flex; gap:7px; align-items:flex-start; margin-top:8px; font-size:12px; cursor:pointer;"><input id="include-attachments-picker" type="checkbox" ${state.includeAttachments?'checked':''}><span>${chT('同时下载上传和生成的附件','Download uploads and generated files')}<small style="display:block;color:#6b7280;margin-top:2px;">${chT('默认关闭；开启后处理时间与本地占用可能明显增加。','Off by default; increases processing time and local storage.')}</small></span></label>
-                    </details>
-                    <div id="ch-sync-progress" style="display:none; padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
-                        <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12px;"><strong id="ch-sync-progress-primary"></strong><span id="ch-sync-progress-pct" style="color:#6b7280;"></span></div>
-                        <div style="height:6px;margin-top:7px;background:#e5e7eb;border-radius:999px;overflow:hidden;"><div id="ch-sync-progress-bar" style="width:0%;height:100%;background:#10a37f;border-radius:999px;transition:width .18s ease;"></div></div>
-                        <div id="ch-sync-progress-secondary" style="margin-top:6px;font-size:11px;color:#6b7280;line-height:1.45;"></div>
-                        <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;"><button id="ch-pause-sync-btn" style="display:none;padding:5px 9px;border:1px solid #6366f1;border-radius:6px;background:#fff;color:#4338ca;cursor:pointer;">${chT('暂停','Pause')}</button><button id="ch-cancel-sync-btn" style="display:none;padding:5px 9px;border:1px solid #dc2626;border-radius:6px;background:#fff;color:#b91c1c;cursor:pointer;">${chT('取消同步','Cancel sync')}</button></div>
+                        <details style="padding:9px 10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
+                            <summary id="ch-network-policy-summary" style="cursor:pointer; font-size:13px; font-weight:600;">${chT('网络策略','Network policy')} · ${chNetworkPolicySummary(state.networkPolicy)}</summary>
+                            <div style="display:grid; grid-template-columns:1fr 1fr; gap:7px; margin-top:8px;">
+                                <label style="font-size:11px;color:#6b7280;grid-column:1/-1;">${chT('速度','Speed')}<select id="ch-speed-level" style="width:100%;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;">${CH_SPEED_LEVELS.map((x,i)=>`<option value="${i}" ${i===state.networkPolicy.speedIndex?'selected':''}>${x.name}</option>`).join('')}</select></label>
+                                <label style="font-size:11px;color:#6b7280;">${chT('每批','Batch')}<input id="ch-batch-size" type="number" min="1" max="200" value="${state.networkPolicy.batchSize}" style="width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;"></label>
+                                <span></span>
+                                <label style="font-size:11px;color:#6b7280;">${chT('暂停最小(秒)','Pause min(s)')}<input id="ch-pause-min" type="number" min="0" max="3600" value="${state.networkPolicy.batchPauseMinSec}" style="width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;"></label>
+                                <label style="font-size:11px;color:#6b7280;">${chT('暂停最大(秒)','Pause max(s)')}<input id="ch-pause-max" type="number" min="0" max="3600" value="${state.networkPolicy.batchPauseMaxSec}" style="width:100%;box-sizing:border-box;margin-top:3px;padding:6px;border:1px solid #d1d5db;border-radius:6px;"></label>
+                            </div>
+                        </details>
+                        <details style="padding:9px 10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
+                            <summary style="cursor:pointer; font-size:13px; font-weight:600;">${chT('同步内容','Sync content')}</summary>
+                            <label style="display:flex; gap:7px; align-items:flex-start; margin-top:8px; font-size:12px; cursor:pointer;"><input id="include-attachments-picker" type="checkbox" ${state.includeAttachments?'checked':''}><span>${chT('同时下载上传和生成的附件','Download uploads and generated files')}<small style="display:block;color:#6b7280;margin-top:2px;">${chT('默认关闭；开启后处理时间与本地占用可能明显增加。','Off by default; increases processing time and local storage.')}</small></span></label>
+                        </details>
+                        <div id="ch-sync-progress" style="display:none; padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
+                            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;font-size:12px;"><strong id="ch-sync-progress-primary"></strong><span id="ch-sync-progress-pct" style="color:#6b7280;"></span></div>
+                            <div style="height:6px;margin-top:7px;background:#e5e7eb;border-radius:999px;overflow:hidden;"><div id="ch-sync-progress-bar" style="width:0%;height:100%;background:#10a37f;border-radius:999px;transition:width .18s ease;"></div></div>
+                            <div id="ch-sync-progress-secondary" style="margin-top:6px;font-size:11px;color:#6b7280;line-height:1.45;"></div>
+                            <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;"><button id="ch-pause-sync-btn" style="display:none;padding:5px 9px;border:1px solid #6366f1;border-radius:6px;background:#fff;color:#4338ca;cursor:pointer;">${chT('暂停','Pause')}</button><button id="ch-cancel-sync-btn" style="display:none;padding:5px 9px;border:1px solid #dc2626;border-radius:6px;background:#fff;color:#b91c1c;cursor:pointer;">${chT('取消同步','Cancel sync')}</button></div>
+                        </div>
+                        <div id="ch-result-panel" style="display:none; padding:9px 10px; border:1px solid #bbf7d0; border-radius:9px; background:#f0fdf4;">
+                            <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong id="ch-result-title" style="font-size:13px;"></strong><button id="ch-copy-report-btn" style="padding:3px 7px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;font-size:11px;">${chT('复制详细报告','Copy details')}</button></div><pre id="ch-result-summary" style="margin:6px 0 0;white-space:pre-wrap;font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#374151;"></pre>
+                        </div>
                     </div>
-                    <div id="ch-result-panel" style="display:none; padding:10px; border:1px solid #bbf7d0; border-radius:9px; background:#f0fdf4;">
-                        <strong id="ch-result-title" style="font-size:13px;"></strong><pre id="ch-result-summary" style="margin:7px 0 0;white-space:pre-wrap;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#374151;"></pre><button id="ch-copy-report-btn" style="margin-top:7px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">${chT('复制详细报告','Copy details')}</button>
-                    </div>
-                    <div style="margin-top:auto; padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
-                        <button id="sync-directory-btn" style="width:100%;padding:11px 14px;border:none;border-radius:7px;background:#10a37f;color:#fff;cursor:pointer;font-weight:700;white-space:nowrap;">${chT('同步选中','Sync selected')}</button>
+                    <div id="ch-action-bar" style="flex:0 0 auto; padding:9px; border:1px solid #d1d5db; border-radius:9px; background:#fff; box-shadow:0 -4px 16px rgba(15,23,42,.04);">
+                        <button id="sync-directory-btn" style="width:100%;padding:12px 14px;border:none;border-radius:7px;background:#10a37f;color:#fff;cursor:pointer;font-weight:700;white-space:nowrap;">${chT('同步选中','Sync selected')}</button>
                     </div>
                 </aside>
             </div>`;
@@ -2954,6 +2958,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         const pauseMinInput = $('ch-pause-min');
         const pauseMaxInput = $('ch-pause-max');
         const networkSummary = $('ch-network-policy-summary');
+        const archiveCopyReportBtn = $('ch-archive-copy-report-btn');
 
         spaceSelect.value = state.mode;
         archivedSelect.value = state.archived;
@@ -2995,7 +3000,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             const pending = [...state.syncStatusById.values()].filter(pendingStatus).length;
             const options = [
                 ['all', `${chT('同步状态：全部','Sync: all')} (${state.list.length})`],
-                ['pending', `${chT('待同步','Pending')} (${pending})`],
+                ['pending', `${chT('待处理','To process')} (${pending})`],
                 ['NEW', `${chT('新增','New')} (${counts.NEW||0})`],
                 ['VERIFY', `${chT('待核验','Verify')} (${counts.VERIFY||0})`],
                 ['UPDATED', `${chT('内容更新','Updated')} (${counts.UPDATED||0})`],
@@ -3037,9 +3042,23 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         };
         const updateArchiveSummary = () => {
             $('ch-archive-path').textContent = state.rootHandle?.name || chT('尚未选择目录','No directory selected');
-            $('ch-archive-summary').textContent = state.rootHandle
-                ? (state.lastPlan ? chT('本地扫描完成 · 同步状态已更新','Local scan complete · sync states updated') : chT('目录已选择 · 等待扫描','Directory selected · waiting for scan'))
-                : chT('选择目录后将自动执行只读扫描','A read-only scan runs automatically after choosing a directory');
+            if (!state.rootHandle) {
+                $('ch-archive-summary').textContent = chT('选择目录后将自动执行只读扫描','A read-only scan runs automatically after choosing a directory');
+            } else if (!state.lastPlan) {
+                $('ch-archive-summary').textContent = chT('目录已选择 · 等待扫描','Directory selected · waiting for scan');
+            } else {
+                const s = state.lastPlan.summary;
+                const verifyCount = Math.max(0, (s.maximumFetchRequired || 0) - (s.newCount || 0));
+                const parts = [
+                    `${chT('本地','Local')} ${s.local || 0}`,
+                    `${chT('新增','New')} ${s.newCount || 0}`,
+                    `${chT('待核验','Verify')} ${verifyCount}`
+                ];
+                if (s.unchangedCount) parts.push(`${chT('已同步','Synced')} ${s.unchangedCount}`);
+                if (s.errorCount || s.duplicateIdCount) parts.push(`${chT('异常','Issues')} ${(s.errorCount||0)+(s.duplicateIdCount||0)}`);
+                $('ch-archive-summary').textContent = parts.join(' · ');
+            }
+            if (archiveCopyReportBtn) archiveCopyReportBtn.style.display = state.lastPlan ? '' : 'none';
             updateHeader();
         };
         const updateControls = () => {
@@ -3106,15 +3125,41 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             state.rootHandle=await window.showDirectoryPicker({mode:'readwrite'});updateArchiveSummary();return state.rootHandle;
         };
         const decorateProjectKnowledge = (items, complete) => (items||[]).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':complete?'none':'unknown'}));
-        const loadRemoteList = async () => {
-            state.loading=true;state.selected.clear();state.syncStatusById.clear();state.lastPlan=null;state.remoteUniverse=[];renderList();
+        const applyAccountScopeFromCache = () => {
+            const all = Array.isArray(state.accountUniverse) ? state.accountUniverse : [];
+            state.remoteUniverse = all;
+            state.remoteUniverseComplete = state.accountUniverseComplete;
+            state.remoteUniverseNote = state.accountUniverseNote;
+            state.list = state.mode === 'project' ? all.filter(item => item.projectId || item.projectTitle) : all;
+        };
+        const loadAccountUniverse = async (force=false) => {
+            if (!force && Array.isArray(state.accountUniverse)) {
+                applyAccountScopeFromCache();
+                return;
+            }
+            const base=await listConversations(null);
+            const universe=await chCollectPreflightRemoteUniverse('personal',null,base);
+            state.accountUniverse=decorateProjectKnowledge(universe.remoteList,universe.complete);
+            state.accountUniverseComplete=universe.complete;state.accountUniverseNote=universe.note;state.accountLoadedAt=Date.now();
+            applyAccountScopeFromCache();
+        };
+        const loadTeamUniverse = async (force=false) => {
+            if(!state.workspaceId){const ids=detectAllWorkspaceIds();if(ids.length===0)throw new Error(chT('未检测到 Team Workspace ID，请先打开一个团队对话后再试。','No Team Workspace ID detected. Open a team conversation first.'));state.workspaceId=ids[0];}
+            const key=String(state.workspaceId);
+            if(!force && state.teamUniverseCache.has(key)){
+                const cached=state.teamUniverseCache.get(key);state.remoteUniverse=cached.list;state.remoteUniverseComplete=cached.complete;state.remoteUniverseNote=cached.note;state.list=cached.list;return;
+            }
+            const base=await listConversations(state.workspaceId);
+            const universe=await chCollectPreflightRemoteUniverse('team',state.workspaceId,base);
+            const list=decorateProjectKnowledge(universe.remoteList,universe.complete);
+            state.teamUniverseCache.set(key,{list,complete:universe.complete,note:universe.note,loadedAt:Date.now()});
+            state.remoteUniverse=list;state.remoteUniverseComplete=universe.complete;state.remoteUniverseNote=universe.note;state.list=list;
+        };
+        const loadRemoteList = async (force=false) => {
+            state.loading=true;state.syncStatusById.clear();state.lastPlan=null;renderList();
             try{
-                if(state.mode==='team'&&!state.workspaceId){const ids=detectAllWorkspaceIds();if(ids.length===0)throw new Error(chT('未检测到 Team Workspace ID，请先打开一个团队对话后再试。','No Team Workspace ID detected. Open a team conversation first.'));state.workspaceId=ids[0];}
-                const base=state.mode==='project'?await listProjectSpaceConversations(state.workspaceId):await listConversations(state.mode==='team'?state.workspaceId:null);
-                const universe=await chCollectPreflightRemoteUniverse(state.mode,state.workspaceId,base);
-                state.remoteUniverse=decorateProjectKnowledge(universe.remoteList,universe.complete);
-                state.remoteUniverseComplete=universe.complete;state.remoteUniverseNote=universe.note;
-                state.list=state.mode==='project'?decorateProjectKnowledge(chMergeRemoteEntries(base),universe.complete):state.remoteUniverse;
+                if(state.mode==='team') await loadTeamUniverse(force);
+                else await loadAccountUniverse(force);
                 state.loading=false;renderAll();
                 if(state.rootHandle)await runPreflight(true);
             }catch(err){state.loading=false;state.list=[];state.filtered=[];state.remoteUniverse=[];$('conv-status').textContent=`${chT('加载失败','Load failed')}: ${err.message}`;renderList();}
@@ -3142,7 +3187,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         };
 
         searchInput.oninput=e=>{state.query=e.target.value||'';applyFilters();renderList();};
-        spaceSelect.onchange=async e=>{state.mode=e.target.value;state.workspaceId=null;state.projectFilter='all';state.syncStatus='all';await loadRemoteList();};
+        spaceSelect.onchange=async e=>{const next=e.target.value;state.projectFilter='all';state.syncStatus='all';if(next==='team'){state.mode='team';state.workspaceId=null;await loadRemoteList(false);}else{state.mode=next;state.workspaceId=null;state.loading=true;renderList();await loadAccountUniverse(false);state.loading=false;renderAll();if(state.rootHandle)await runPreflight(true);}};
         projectSelect.onchange=e=>{state.projectFilter=e.target.value;applyFilters();renderList();};
         archivedSelect.onchange=e=>{state.archived=e.target.value;applyFilters();renderList();};
         syncStatusSelect.onchange=e=>{state.syncStatus=e.target.value;applyFilters();renderList();};
@@ -3153,7 +3198,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         endDateInput.onchange=e=>{state.endDate=e.target.value||'';applyFilters();renderList();};
         includeAttachmentsInput.onchange=e=>{state.includeAttachments=e.target.checked;};
         selectAllCheckbox.onchange=()=>{const allSelected=state.filtered.length>0&&state.filtered.every(item=>state.selected.has(item.id));if(allSelected){state.filtered.forEach(item=>state.selected.delete(item.id));}else{state.filtered.forEach(item=>state.selected.add(item.id));}renderList();};
-        refreshBtn.onclick=async()=>{const keep=new Set(state.selected);await loadRemoteList();for(const id of keep)if(state.list.some(item=>item.id===id))state.selected.add(id);renderList();};
+        refreshBtn.onclick=async()=>{const keep=new Set(state.selected);await loadRemoteList(true);state.selected.clear();for(const id of keep)if(state.list.some(item=>item.id===id))state.selected.add(id);renderList();};
         closeBtn.onclick=closeDialog;
         chooseDirBtn.onclick=async()=>{try{state.rootHandle=null;state.lastPlan=null;await ensureRoot();await runPreflight(true);}catch(err){if(err?.name!=='AbortError')chSetProgress(chT('选择目录失败','Directory selection failed'),err?.message||String(err),null);}};
         preflightBtn.onclick=()=>runPreflight(false);
@@ -3243,18 +3288,14 @@ preflight_report_block = r'''    function chPreflightReportText(plan) {
     }
 
     function chShowPreflightReport(plan) {
-        const s = plan.summary;
-        chRenderInlineReport(
-            chT('本地扫描完成','Local scan complete'),
-            [
-                chT('同步状态已更新，可按筛选结果选择需要同步的对话。','Sync states are updated; select conversations using the filters.'),
-                s.errorCount || s.duplicateIdCount
-                    ? chT('发现异常，请查看详细报告后再决定是否同步。','Issues were found; review details before syncing.')
-                    : chT('✓ 只读扫描未写入对话文件或 Manifest','✓ Read-only scan did not write conversation files or the manifest')
-            ],
-            chPreflightReportText(plan),
-            s.errorCount || s.duplicateIdCount ? 'warn' : 'success'
-        );
+        const detail = chPreflightReportText(plan);
+        const btn = document.getElementById('ch-archive-copy-report-btn');
+        if (btn) btn.onclick = async () => {
+            try { await navigator.clipboard.writeText(detail); const old=btn.textContent; btn.textContent=chT('已复制','Copied'); setTimeout(()=>btn.textContent=old,1200); }
+            catch (_) { console.log(detail); }
+        };
+        const resultPanel = document.getElementById('ch-result-panel');
+        if (resultPanel && !chSyncRun.active) resultPanel.style.display = 'none';
     }
 
 '''
@@ -3325,10 +3366,14 @@ required_runtime_markers = [
     "id=\"ch-space-select\"",
     "id=\"select-all-checkbox\"",
     "id=\"ch-result-panel\"",
+    "id=\"ch-action-bar\"",
+    "id=\"ch-archive-copy-report-btn\"",
     "grid-template-columns:minmax(0,1fr) 310px",
     "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';",
     "chReconcileRuntimeState",
     "按选择范围开始流式核验与写入",
+    "accountUniverse",
+    "待处理",
 ]
 missing_runtime_markers = [marker for marker in required_runtime_markers if marker not in text]
 if missing_runtime_markers:
