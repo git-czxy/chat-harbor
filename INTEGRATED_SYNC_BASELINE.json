@@ -1,0 +1,51 @@
+{
+  "product": "ChatHarbor",
+  "build": "Integrated Version-aware Selective Sync",
+  "status": "READY_FOR_ONE_TIME_REAL_ENV_ACCEPTANCE",
+  "date": "2026-09-14",
+  "clean_upstream": {
+    "repository": "huhusmang/ChatGPT-Exporter",
+    "commit": "efa1f0f266d15c053af4ab4607b948a06332d9f7",
+    "tampermonkey_git_blob": "3a5dfe6a696e03db7028232d45b136104e67b51f",
+    "upstream_version": "1.5.0",
+    "license": "MIT"
+  },
+  "validated_baseline_preserved": [
+    "Directory Writer",
+    "conversation_id manifest identity",
+    "sha256-current_node+mapping-v1 content signature",
+    "attachment preservation when download is disabled",
+    "non-blocking 100% progress"
+  ],
+  "integrated_stage_scope": [
+    "read-only local archive scan",
+    "preflight planner",
+    "remote list universe completion and canonical-ID merge",
+    "candidate-only detail fetch",
+    "content-signature final verification",
+    "NEW",
+    "UNCHANGED",
+    "UPDATED",
+    "RENAMED_ONLY",
+    "UPDATED_AND_RENAMED",
+    "METADATA_ONLY",
+    "LOCAL_ONLY protection",
+    "DUPLICATE / ERROR blocking",
+    "LOCAL_UNTRACKED conservative adoption",
+    "selective sync using the existing picker checkboxes",
+    "full sync when no checkbox is selected",
+    "write -> verify -> manifest commit -> tracked-only cleanup ordering"
+  ],
+  "explicitly_not_in_this_stage": [
+    "multi-level conservative network-policy migration",
+    "final zh-CN/en-US resource refactor",
+    "removal of upstream ZIP compatibility UI/code",
+    "ZIP snapshot feature"
+  ],
+  "authority": {
+    "identity": "conversation_id",
+    "manifest": "ChatHarbor_manifest.json",
+    "local_only_auto_delete": false,
+    "untracked_legacy_asset_auto_delete": false
+  }
+}
