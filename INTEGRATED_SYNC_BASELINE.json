@@ -1,6 +1,6 @@
 {
   "product": "ChatHarbor",
-  "build": "Runtime Convergence + Shared Backend Scheduler + Commit-accurate State + Incremental Attachments + Cached Remote Index + Archive Layout v2",
+  "build": "Typed HTTP Failure + Observable Retry + Lane-aware Discovery + Runtime Convergence + Archive Layout v2",
   "status": "AUTOMATED_REGRESSION_PASS_REAL_UI_AND_LIVE_ENDPOINT_SMOKE_REQUIRED",
   "date": "2026-09-15",
   "clean_upstream": {
@@ -85,7 +85,10 @@
     "visible synchronization state is commit-accurate; classification alone cannot mark an actionable item as synchronized",
     "Manifest-first scan quick-checks tracked attachment files for existence/size and downgrades missing/mismatched assets to partial",
     "attachment reuse requires both Manifest identity and physical-file validity",
-    "newly written attachment paths are best-effort cleaned if Manifest commit fails"
+    "newly written attachment paths are best-effort cleaned if Manifest commit fails",
+    "typed HTTP failure handling: 429 / 5xx / 401-403 / 404 / transport errors are distinct",
+    "lane-specific bounded 5xx backoff: discovery and attachment metadata short, detail conservative, binary separate",
+    "retry status includes request context and current conversation/attachment label when available"
   ],
   "explicitly_not_in_this_stage": [
     "full localization of every inherited upstream string outside ChatHarbor-owned UI",
@@ -104,7 +107,7 @@
     "remote_absence_requires_complete_universe": true,
     "remote_list_checkpoint": "remote_list_* Manifest observation fields"
   },
-  "integrated_build_version": "0.0.13.0",
+  "integrated_build_version": "0.0.13.1",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,
@@ -118,10 +121,11 @@
     "remote_index_fast_head_per_source": 20,
     "remote_index_periodic_full_seconds": 86400,
     "remote_index_sync_fresh_seconds": 120,
-    "remote_index_cache": "IndexedDB; disposable acceleration data; complete snapshots only persisted",
-    "network_scheduler": "single serialized ChatHarbor /backend-api control-plane gate; selected policy applies horizontally",
+    "remote_index_cache": "IndexedDB; disposable acceleration data; complete snapshots authoritative for absence checks; incomplete snapshots may persist for UI/recovery only",
+    "network_scheduler": "single serialized ChatHarbor /backend-api control gate with lane-aware cadence: discovery lightweight, detail user-policy cadence/batching, attachment metadata moderate; shared retry taxonomy and 429 cooldown",
     "global_429_cooldown": "120s × retry attempt, shared across discovery/detail/attachment-metadata paths",
-    "binary_transfer": "separate data-transfer retry path; no ordinary control-plane pacing, but 429 advances global cooldown"
+    "binary_transfer": "separate data-transfer retry path; no ordinary control-plane pacing, but 429 advances global cooldown",
+    "http_failure_policy": "429 global cooldown; 5xx lane-specific bounded retry; 401/403/404 no blind retry; transport failures lane-specific retry"
   },
   "ui": {
     "layout": "Desktop-first single-page workspace",
@@ -143,5 +147,5 @@
     "refresh": "normal click = fast newest-window validation; Shift+click = force complete refresh",
     "preflight_status_visibility": "does not auto-switch to pending; first-stage UNCHANGED / NEW / VERIFY remain directly observable"
   },
-  "core_literal_sha256": "0a7debfae931cddf7cc8d1617c90e8a90910cc4c94823495d5cfe0dd48247b66"
+  "core_literal_sha256": "42b641a3bfc6fdeae085cf9cf55adf8c2e24032384dc25029d75f65a3fb26ca9"
 }

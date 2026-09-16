@@ -35,9 +35,9 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.13.0\n"
-    "// @description  Clean-lineage archive sync with convergent incremental compare, Manifest-first indexing, incremental attachments, lane-aware backend scheduling, global 429 cooldown, progressive remote discovery, commit-accurate UI state, and cached remote-index fast refresh.\n"
-    "// @description:zh-CN 干净来源的本地档案同步：收敛式增量比较、Manifest-first 索引、附件增量补齐、分级后端调度、全局 429 冷却、渐进式远端发现、提交准确状态与远端索引缓存快速刷新。\n"
+    "// @version      0.0.13.1\n"
+    "// @description  Clean-lineage archive sync with convergent incremental compare, Manifest-first indexing, incremental attachments, lane-aware backend scheduling, typed HTTP failure handling, request-context retry status, global 429 cooldown, progressive remote discovery, commit-accurate UI state, and cached remote-index fast refresh.\n"
+    "// @description:zh-CN 干净来源的本地档案同步：收敛式增量比较、Manifest-first 索引、附件增量补齐、分级后端调度、HTTP 错误分类、请求上下文重试提示、全局 429 冷却、渐进式远端发现、提交准确状态与远端索引缓存快速刷新。\n"
     "// @author       huhu; ChatHarbor contributors\n"
 )
 
@@ -186,6 +186,7 @@ directory_writer = r'''
         }
     };
     let chNetworkStatusHook = null;
+    const chBackendContext = { detailTitle: null, detailId: null, attachmentName: null };
 
     function chSetNetworkStatusHook(fn) {
         chNetworkStatusHook = typeof fn === 'function' ? fn : null;
@@ -223,6 +224,53 @@ directory_writer = r'''
 
     function chBackendPolicy() {
         return chNormalizeNetworkPolicy(chSyncRun?.active ? chSyncRun.policy : chLoadNetworkPolicy());
+    }
+
+    function chBackendRequestDescriptor(resource, lane = null) {
+        try {
+            const url = resource instanceof Request ? resource.url : String(resource || '');
+            const parsed = new URL(url, location.origin);
+            const path = parsed.pathname;
+            const resolvedLane = lane || chBackendLaneFor(resource);
+            if (/^\/backend-api\/conversations\/?$/i.test(path)) return '远端对话列表';
+            if (/^\/backend-api\/gizmos\/snorlax\/sidebar/i.test(path)) return '项目列表';
+            const projectMatch = path.match(/^\/backend-api\/gizmos\/([^/]+)\/conversations/i);
+            if (projectMatch) return `项目对话列表 · ${projectMatch[1].slice(0, 18)}`;
+            if (resolvedLane === CH_BACKEND_LANE_ATTACHMENT) {
+                const label = chBackendContext.attachmentName;
+                if (label) return `附件元数据 · ${String(label).slice(0, 52)}`;
+                const fileMatch = path.match(/^\/backend-api\/files\/download\/([^/]+)/i);
+                if (fileMatch) return `附件元数据 · ${fileMatch[1].slice(0, 28)}`;
+                return '附件元数据';
+            }
+            if (resolvedLane === CH_BACKEND_LANE_DETAIL) {
+                const label = chBackendContext.detailTitle;
+                if (label) return `对话详情 · ${String(label).slice(0, 52)}`;
+                const detailMatch = path.match(/^\/backend-api\/conversation\/([^/]+)/i);
+                if (detailMatch) return `对话详情 · ${detailMatch[1].slice(0, 18)}`;
+                return '对话详情';
+            }
+            return 'ChatGPT 后端请求';
+        } catch (_) {
+            return lane === CH_BACKEND_LANE_DISCOVERY ? '远端索引' : lane === CH_BACKEND_LANE_ATTACHMENT ? '附件元数据' : '对话详情';
+        }
+    }
+
+    function chRetryDelayForFailure({ status = null, lane = CH_BACKEND_LANE_DETAIL, attempt = 1, binary = false } = {}) {
+        const n = Math.max(1, Number(attempt) || 1);
+        if (status === 429) return 120000 * n;
+        if (status === 401 || status === 403 || status === 404) return null;
+        if (status != null && !(status >= 500 && status <= 599)) return null;
+        if (binary) return 10000 * n;
+        if (lane === CH_BACKEND_LANE_DISCOVERY) return 5000 * n;
+        if (lane === CH_BACKEND_LANE_ATTACHMENT) return 5000 * n;
+        return 15000 * n;
+    }
+
+    function chRetryPrimary(status, binary = false) {
+        if (status === 429) return 'API 限流（429）';
+        if (status >= 500 && status <= 599) return `服务端错误（HTTP ${status}）`;
+        return binary ? '附件下载网络异常' : '网络连接异常';
     }
 
     function chLaneDelayMs(lane, policy) {
@@ -315,27 +363,31 @@ directory_writer = r'''
                     lastResponse = response;
                     chAfterBackendAttempt(policy, lane);
                     const status = Number(response?.status || 0);
+                    const requestLabel = chBackendRequestDescriptor(resource, lane);
                     if (status === 429) {
-                        const retryMs = 120000 * Math.max(1, attempt);
+                        const retryMs = chRetryDelayForFailure({ status, lane, attempt });
                         chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
                         chBackendScheduler.cooldownReason = 'HTTP_429';
                         if (attempt < maxAttempts) {
-                            await chWaitForBackendGate(`第 ${attempt}/${policy.maxRetries} 次重试前`, lane);
+                            await chWaitForBackendGate(`${requestLabel} · 第 ${attempt}/${policy.maxRetries} 次重试前`, lane);
                             continue;
                         }
                     } else if (status >= 500 && status <= 599 && attempt < maxAttempts) {
-                        const retryMs = 30000 * Math.max(1, attempt);
-                        await chSchedulerSleep(retryMs, '网络异常，保守重试等待', `HTTP ${status} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                        const retryMs = chRetryDelayForFailure({ status, lane, attempt });
+                        await chSchedulerSleep(retryMs, chRetryPrimary(status), `${requestLabel} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
                         continue;
                     }
+                    // 401/403/404 and other non-retryable HTTP responses return immediately to
+                    // the owning operation, which records the concrete conversation/asset failure.
                     return response;
                 } catch (err) {
                     if (chIsCancellation(err)) throw err;
                     lastError = err;
                     chAfterBackendAttempt(policy, lane);
                     if (attempt >= maxAttempts) break;
-                    const retryMs = 30000 * Math.max(1, attempt);
-                    await chSchedulerSleep(retryMs, '网络异常，保守重试等待', `第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                    const requestLabel = chBackendRequestDescriptor(resource, lane);
+                    const retryMs = chRetryDelayForFailure({ status: null, lane, attempt });
+                    await chSchedulerSleep(retryMs, chRetryPrimary(null), `${requestLabel} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
                 }
             }
             if (lastResponse) return lastResponse;
@@ -356,13 +408,13 @@ directory_writer = r'''
                 lastResponse = response;
                 const status = Number(response?.status || 0);
                 if (status === 429) {
-                    const retryMs = 120000 * Math.max(1, attempt);
+                    const retryMs = chRetryDelayForFailure({ status, lane: CH_BACKEND_LANE_ATTACHMENT, attempt, binary: true });
                     chBackendScheduler.cooldownUntil = Math.max(chBackendScheduler.cooldownUntil || 0, Date.now() + retryMs);
                     chBackendScheduler.cooldownReason = 'HTTP_429';
                     if (attempt < maxAttempts) { await chWaitForBackendGate(`附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`, CH_BACKEND_LANE_ATTACHMENT); continue; }
                 } else if (status >= 500 && status <= 599 && attempt < maxAttempts) {
-                    const retryMs = 30000 * Math.max(1, attempt);
-                    await chSchedulerSleep(retryMs, '附件下载网络异常', `HTTP ${status} · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                    const retryMs = chRetryDelayForFailure({ status, lane: CH_BACKEND_LANE_ATTACHMENT, attempt, binary: true });
+                    await chSchedulerSleep(retryMs, chRetryPrimary(status, true), `附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
                     continue;
                 }
                 return response;
@@ -370,7 +422,8 @@ directory_writer = r'''
                 if (chIsCancellation(err)) throw err;
                 lastError = err;
                 if (attempt >= maxAttempts) break;
-                await chSchedulerSleep(30000 * attempt, '附件下载网络异常', `第 ${attempt}/${policy.maxRetries} 次重试前`, true);
+                const retryMs = chRetryDelayForFailure({ status: null, lane: CH_BACKEND_LANE_ATTACHMENT, attempt, binary: true });
+                await chSchedulerSleep(retryMs, chRetryPrimary(null, true), `附件数据 · 第 ${attempt}/${policy.maxRetries} 次重试前`, true);
             }
         }
         if (lastResponse) return lastResponse;
@@ -546,9 +599,18 @@ directory_writer = r'''
         return 30000 * Math.max(1, attempt);
     }
 
-    async function chGetConversationConservative(id, workspaceId = null) {
+    async function chGetConversationConservative(id, workspaceId = null, title = null) {
         await chControlCheckpoint('detail-fetch');
-        return getConversation(id, workspaceId);
+        const previousTitle = chBackendContext.detailTitle;
+        const previousId = chBackendContext.detailId;
+        chBackendContext.detailTitle = title || null;
+        chBackendContext.detailId = id || null;
+        try {
+            return await getConversation(id, workspaceId);
+        } finally {
+            chBackendContext.detailTitle = previousTitle;
+            chBackendContext.detailId = previousId;
+        }
     }
 
     function chUpdateRunControlUi() {
@@ -897,7 +959,14 @@ directory_writer = r'''
         for (let i = 0; i < missingRefs.length; i++) {
             const reference = missingRefs[i];
             try {
-                const downloaded = await fetchBinary(reference, convData, workspaceId);
+                const previousAttachmentName = chBackendContext.attachmentName;
+                chBackendContext.attachmentName = reference.name || reference.fileId || reference.sandboxPath || 'attachment';
+                let downloaded;
+                try {
+                    downloaded = await fetchBinary(reference, convData, workspaceId);
+                } finally {
+                    chBackendContext.attachmentName = previousAttachmentName;
+                }
                 const filename = uniqueAttachmentName(downloaded.filename, usedNames);
                 await writeBinary(assetDir, filename, downloaded.data);
 
@@ -2577,7 +2646,7 @@ directory_writer = r'''
             );
             try {
                 await chControlCheckpoint('detail-verification');
-                const convData = await chGetConversationConservative(item.id, workspaceId);
+                const convData = await chGetConversationConservative(item.id, workspaceId, title);
                 resultItems.push(await chClassifyFetchedConversation(item, convData, { includeAttachments: false }));
             } catch (err) {
                 if (chIsCancellation(err)) throw err;
@@ -2977,7 +3046,7 @@ directory_writer = r'''
                         Math.min(98, Math.round((i / totalItems) * 98))
                     );
                     try {
-                        const convData = await chGetConversationConservative(item.id, workspaceId);
+                        const convData = await chGetConversationConservative(item.id, workspaceId, title);
                         verification.detailFetchCount++;
                         fetchIndex++;
                         classified = await chClassifyFetchedConversation(item, convData, { includeAttachments });
@@ -3367,7 +3436,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.13.0 Network/State Convergence Release ========================
+# ======================== ChatHarbor 0.0.13.1 Typed Failure + Observable Retry Release ========================
 # This release closes cross-cutting runtime gaps across network scheduling, remote refresh
 # snapshot freezing, physical attachment integrity, commit-accurate status and presentation.
 
@@ -4163,6 +4232,9 @@ required_runtime_markers = [
     "CH_BACKEND_LANE_DISCOVERY",
     "CH_BACKEND_LANE_ATTACHMENT",
     "chSetNetworkStatusHook",
+    "function chBackendRequestDescriptor",
+    "function chRetryDelayForFailure",
+    "服务端错误（HTTP",
     "partial-root",
     "remoteRefreshPromise",
     "pendingRemoteSnapshot",

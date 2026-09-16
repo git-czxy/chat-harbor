@@ -1,4 +1,4 @@
-# ChatHarbor 0.0.13.0 — Lane-aware Discovery Recovery
+# ChatHarbor 0.0.13.1 — Typed Failure & Observable Retry
 
 This release corrects the startup/discovery regression exposed by real use of 0.0.12.0. It keeps the shared correctness controls introduced in 0.0.12.0, but separates **shared control** from **shared speed**.
 
@@ -76,6 +76,36 @@ Open ChatHarbor
 
 A full discovery must no longer use the 6–10 second conversation-detail cadence for every list/project request.
 
+
+## Typed HTTP failure handling
+
+0.0.13.1 keeps the lane-aware scheduler from 0.0.13.0, but makes retry behavior depend on the actual failure class and request lane:
+
+- `429`: shared global cooldown, unchanged;
+- `500-599`: service-side failure with bounded lane-specific retry;
+- `401/403`: authentication / permission failure, no blind retry loop;
+- `404`: missing remote resource, no blind retry loop;
+- fetch/transport exception: network-connection retry with lane-specific backoff.
+
+The runtime status now includes request context. Examples:
+
+```text
+服务端错误（HTTP 500）
+对话详情 · 退运邮件清点系统… · 第 1/2 次重试前
+
+服务端错误（HTTP 503）
+附件元数据 · report.zip · 第 1/2 次重试前
+```
+
+5xx retry costs are intentionally lower than 0.0.13.0:
+
+- discovery: 5s, 10s;
+- conversation detail: 15s, 30s;
+- attachment metadata: 5s, 10s;
+- signed/direct binary transfer: 10s, 20s.
+
+A final failed request is handed back to its owning operation so one bad conversation or attachment is recorded and the run can continue.
+
 ## Build
 
 ```powershell
@@ -85,7 +115,7 @@ powershell -ExecutionPolicy Bypass -File .\prepare_clean_integrated_sync.ps1
 Expected output:
 
 ```text
-ChatHarbor-IntegratedSync-0.0.13.0.user.js
+ChatHarbor-IntegratedSync-0.0.13.1.user.js
 ```
 
 The patcher still verifies the frozen huhusmang baseline Git blob and fails closed on a different upstream file.

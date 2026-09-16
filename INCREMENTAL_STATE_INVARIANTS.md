@@ -1,4 +1,4 @@
-# ChatHarbor Incremental State Invariants — 0.0.13.0
+# ChatHarbor Incremental State Invariants — 0.0.13.1
 
 These invariants define the correctness boundary for incremental synchronization.
 
@@ -85,7 +85,7 @@ failed/missing attachment references remain PARTIAL and are retryable
 
 A legacy record is inferred `complete` only when it has a positive `attachment_detected`, zero failures, downloaded count covering the detected count, and at least that many tracked assets. A zero legacy count is deliberately not interpreted as `none` unless there is an explicit later `attachments_checked_at` fact.
 
-## Runtime horizontal invariants (0.0.13.0)
+## Runtime horizontal invariants (0.0.13.1)
 
 ### I-11 — Network policy is horizontal
 Every ChatHarbor `/backend-api/` control-plane request uses one shared serialized scheduler. A 429 creates one global cooldown shared by discovery, project enumeration, detail verification and attachment metadata. Signed/direct binary transfer is a separate data path, but its 429 also advances the global cooldown.
@@ -102,10 +102,23 @@ A sync run freezes one remote snapshot. Background/cache refresh may not replace
 ### I-15 — Newly written attachment residue is not authoritative
 Attachments written during a conversation transaction are not authoritative until Manifest commit succeeds. If Manifest commit fails, newly created attachment paths are removed best-effort and the prior in-memory Manifest record is restored.
 
-## Remote discovery / network scheduling additions (0.0.13.0)
+## Remote discovery / network scheduling additions (0.0.13.1)
 
 - **Shared control does not imply shared cadence.** Discovery, detail and attachment-metadata traffic share serialization/error/cooldown policy but use lane-appropriate spacing.
 - **Only HTTP 429 is a cross-lane cooldown condition.** A transient 5xx/network failure retries the affected request without globally freezing unrelated lanes.
 - **Partial discovery is display evidence, not absence evidence.** An incomplete Remote Index may accelerate UI/recovery but cannot prove `LOCAL_ONLY` or authorize a write sync.
 - **Existing complete cache outranks progressive incomplete refresh state.** Do not overwrite a known-complete cached universe with an in-progress partial snapshot.
 - **Long waits must be observable.** Discovery cadence and 429 cooldown must not present as an unexplained frozen loading screen.
+
+
+## Typed network failure invariant (0.0.13.1)
+
+```text
+429 != 5xx != auth/permission != missing resource != transport failure
+```
+
+- 429 advances one shared global cooldown.
+- 5xx is a bounded service-error retry owned by the request lane.
+- 401/403/404 do not consume repeated blind retry waits.
+- Retry UI must identify the request class/context well enough to distinguish remote index, conversation detail and attachment failures.
+- One final item-level failure must not stall the entire remaining sync queue.

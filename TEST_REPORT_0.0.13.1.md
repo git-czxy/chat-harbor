@@ -1,4 +1,4 @@
-# ChatHarbor 0.0.13.0 — Automated Regression Report
+# ChatHarbor 0.0.13.1 — Automated Regression Report
 
 Date: 2026-09-15
 
@@ -16,7 +16,7 @@ A real ChatGPT endpoint smoke test is still required for live rate-limit behavio
 - pause/resume/cancel and wall-clock wait behavior;
 - desktop UI / build invariant checks.
 
-## New 0.0.13.0 contracts checked
+## New 0.0.13.1 contracts checked
 
 ```text
 shared scheduler != shared speed
@@ -31,6 +31,14 @@ non-sync scheduler waits expose status through the loading UI
 sync refuses to write from an incomplete remote universe
 ```
 
+
+- typed HTTP failure policy:
+  - 429 keeps shared global cooldown
+  - 5xx uses lane-specific bounded retry
+  - 401/403/404 do not enter blind retry loops
+  - network exceptions are distinguished from service-side 5xx
+- retry status includes request context (discovery/detail/attachment + current title/name when available)
+
 ## Build contract
 
 The PowerShell build:
@@ -43,5 +51,5 @@ The PowerShell build:
 Expected output:
 
 ```text
-ChatHarbor-IntegratedSync-0.0.13.0.user.js
+ChatHarbor-IntegratedSync-0.0.13.1.user.js
 ```

@@ -1,3 +1,11 @@
+## 0.0.13.1 — 2026-09-15
+
+- Classified 429, 5xx, 401/403, 404 and transport failures separately.
+- Kept global 429 cooldown, but reduced ordinary 5xx retry cost with lane-specific backoff.
+- Added request-context retry status for remote discovery, conversation detail and attachment metadata.
+- Authentication/permission/missing-resource responses no longer enter blind retry loops.
+- Preserved 0.0.13.0 lane-aware cadence, progressive discovery, Manifest convergence and attachment incrementality.
+
 ## 0.0.13.0 — 2026-09-15
 
 ### Runtime convergence

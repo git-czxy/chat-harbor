@@ -4,8 +4,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 patch=(ROOT/'ChatHarbor_IntegratedSync_patch.py').read_text(encoding='utf-8')
 prepare=(ROOT/'prepare_clean_integrated_sync.ps1').read_text(encoding='utf-8')
-assert '// @version      0.0.13.0' in patch
-assert 'ChatHarbor-IntegratedSync-0.0.13.0.user.js' in prepare
+assert '// @version      0.0.13.1' in patch
+assert 'ChatHarbor-IntegratedSync-0.0.13.1.user.js' in prepare
 assert 'async function chBackendFetch' in patch
 assert 'async function chDataTransferFetch' in patch
 assert 'const chBackendScheduler' in patch
@@ -38,4 +38,11 @@ assert "Batch pauses belong only to expensive conversation-detail traffic" in co
 assert "Incomplete snapshots are still useful UI/discovery cache" in core
 assert "partial-root" in core and "partial-projects" in core
 assert "chSetNetworkStatusHook" in core
-print('PASS 0.0.13.0 release/build invariants')
+
+assert 'function chBackendRequestDescriptor' in core
+assert 'function chRetryDelayForFailure' in core
+assert '服务端错误（HTTP' in core
+assert "status === 401 || status === 403 || status === 404" in core
+assert 'chBackendContext.detailTitle' in core and 'chBackendContext.attachmentName' in core
+assert '网络异常，保守重试等待' not in core
+print('PASS 0.0.13.1 release/build invariants')
