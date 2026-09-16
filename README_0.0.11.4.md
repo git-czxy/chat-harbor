@@ -1,6 +1,29 @@
-# ChatHarbor 0.0.11.3 — Incremental Convergence + Cached Remote Index
+# ChatHarbor 0.0.11.4 — Attachment Incremental Convergence
 
 This release fixes the repeated-verification loop discovered during real use and turns the existing Manifest into the primary incremental-sync index. It also adds a persistent remote-list cache with a conservative latest-window early-stop refresh.
+
+## 0.0.11.4 attachment incremental hotfix
+
+This release keeps the 0.0.11.x convergence/cache architecture and closes the attachment-side repetition found during real use.
+
+### Legacy attachment-state inference
+
+Older Manifest records that predate `attachment_state` no longer all become attachment-verification candidates. ChatHarbor now safely infers:
+
+- `complete` only when `attachment_detected > 0`, `attachment_failed = 0`, downloaded count covers detected count, and the Manifest tracks at least that many assets;
+- `partial` when positive legacy evidence shows only some attachments were downloaded or failures remain;
+- `unknown` for legacy zero-count records unless an explicit `attachments_checked_at` fact exists.
+
+This means already-complete old attachment sets can be skipped without a redundant detail fetch, while ambiguous old zeroes remain conservative.
+
+### Missing-only backfill
+
+When detail verification shows that attachments are incomplete, ChatHarbor now matches current attachment references against Manifest-tracked asset identities. Matching existing assets are reused; only missing references are downloaded. A 66-attachment conversation with 60 already present therefore downloads 6, not 66.
+
+### Monotonic attachment progress
+
+The attachment counter is completion-based. Reused assets establish the initial completed count, and each missing attachment attempt advances the counter exactly once. The UI should move monotonically, for example `60/66 -> 61/66 -> ... -> 66/66`, instead of repeatedly emitting before/after values for one item.
+
 
 ## 0.0.11.3 build-invariant hotfix
 
@@ -125,7 +148,7 @@ powershell -ExecutionPolicy Bypass -File .\prepare_clean_integrated_sync.ps1
 The build script downloads the fixed clean upstream commit, verifies the expected Git blob, and generates:
 
 ```text
-ChatHarbor-IntegratedSync-0.0.11.3.user.js
+ChatHarbor-IntegratedSync-0.0.11.4.user.js
 ```
 
 Install/update that generated userscript in Tampermonkey.
@@ -146,5 +169,5 @@ D:\Projects\ChatHarbor\chats\chatgpt
 Core injected-layer SHA-256 used by the automated regression suite:
 
 ```text
-4d9af208b6435a71c49a389166552aab86d85ca3f87a011081408ffef5f38740
+bbedde8bf63d1e8c0e93b742db71d5b3b6012f8763174338be7baab4ad34ff78
 ```

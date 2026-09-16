@@ -1,5 +1,26 @@
 # ChatHarbor Changelog
 
+## 0.0.11.4 — 2026-09-15
+
+### Fixed — legacy attachment convergence
+- Older Manifest records with positive, internally consistent attachment evidence can now infer `complete` without another remote detail request.
+- Legacy `attachment_detected = 0` remains `unknown` unless there is an explicit `attachments_checked_at` fact; zero is not silently treated as proof that no attachment exists.
+- Legacy partial/failed attachment records remain retry candidates.
+
+### Changed — missing-only attachment backfill
+- Attachment-enabled sync now builds a current-reference backfill plan from `source_file_id` / sandbox identity and reuses already tracked assets.
+- Only missing attachment references are downloaded. Existing matching files remain in the Manifest and are linked from regenerated Markdown.
+- Cleanup continues to remove only paths no longer referenced by the committed Manifest; reused asset paths are preserved.
+
+### Fixed — monotonic attachment progress
+- Attachment progress no longer emits a pre-download and post-download count for the same file.
+- The counter is completion-based: it starts from the number of reusable tracked attachments, then advances exactly once per missing attachment attempt.
+- This removes the visually unstable `x / N` counter behavior observed during large attachment runs.
+
+### Preserved
+- No detail-fetch concurrency was added.
+- Remote Index cache, Manifest convergence, Layout v2, conservative network policy, streaming atomic commit and LOCAL_ONLY protections are unchanged.
+
 ## 0.0.11.3 — 2026-09-15
 
 - Fixed the release-build invariant that still expected the obsolete UI phrase `按选择范围开始流式核验与写入`, while 0.0.11.1+ runtime wording had already changed to `按实际待处理范围开始流式核验与写入`.

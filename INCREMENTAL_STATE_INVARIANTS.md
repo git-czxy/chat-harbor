@@ -72,3 +72,15 @@ Fast Remote Index refresh is an optimization only. Any of the following must fal
 - newest-window fingerprint changed;
 - source refresh failure/ambiguity that prevents a reliable complete snapshot;
 - explicit user full refresh.
+
+## Attachment incremental invariants (0.0.11.4)
+
+```text
+legacy positive evidence may prove COMPLETE; legacy zero without checked-at remains UNKNOWN
+current-reference asset already tracked -> reuse, do not redownload
+backfill downloads only references missing from the Manifest asset identity set
+attachment progress is completion-based and monotonic
+failed/missing attachment references remain PARTIAL and are retryable
+```
+
+A legacy record is inferred `complete` only when it has a positive `attachment_detected`, zero failures, downloaded count covering the detected count, and at least that many tracked assets. A zero legacy count is deliberately not interpreted as `none` unless there is an explicit later `attachments_checked_at` fact.

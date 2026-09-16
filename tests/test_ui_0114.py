@@ -98,8 +98,8 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.11.3' in source
-assert '// @version      0.0.11.3' in source
+assert '0.0.11.4' in source
+assert '// @version      0.0.11.4' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v2';" in source
 assert 'background: #10a37f;' in source
 
@@ -178,6 +178,12 @@ assert "trackedFastChecked" in core
 assert "Manifest fast-checked" not in core or True
 print('PASS convergent list-observation checkpoint markers')
 print('PASS attachment completeness/backfill markers')
+assert 'function chInferLegacyAttachmentState' in core
+assert 'function chPlanAttachmentBackfill' in core
+assert 'Progress is completion-based and monotonic' in core
+assert 'root_path: asset?.path ||' in core
+assert 'file.root_path || `${relativePrefix}${file.disk_path}`' in core
+print('PASS legacy attachment inference + missing-only reuse + monotonic progress markers')
 print('PASS Manifest-first local index markers')
 print('PASS remote-index fast-head / periodic-full cache markers')
 

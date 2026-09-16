@@ -14,6 +14,8 @@ function normalizeEpochSeconds(value) {
   return 0;
 }
 function sanitizeFilename(name){ return String(name||'').replace(/[\/\\?%*:|"<>]/g,'-').trim(); }
+function encodeRelativePath(path){ return String(path||'').split('/').map(encodeURIComponent).join('/'); }
+function uniqueAttachmentName(filename,used){ let name=String(filename||'attachment'); if(!used.has(name)){used.add(name);return name;} let i=2; while(used.has(`${name}_${i}`)) i++; const out=`${name}_${i}`; used.add(out); return out; }
 function generateUniqueFilename(c){ return `${sanitizeFilename(c.title||'Untitled')}_${(c.conversation_id||c.id||'id').split('-').pop()}.json`; }
 function generateMarkdownFilename(c){ return generateUniqueFilename(c).replace(/\.json$/,'.md'); }
 function chRemoteConversationId(e){ return String(e?.id||e?.conversation_id||''); }
@@ -197,6 +199,60 @@ chShowIntegratedSyncReport = ()=>{};
   const attachPlan=chBuildPreflightPlan([{id:'X',title:'T',update_time:101,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'}],attachScan,null,{includeAttachments:true});
   assert.strictEqual(attachPlan.items[0].action,'VERIFY_CHANGED');
   assert(attachPlan.items[0].reasons.includes('ATTACHMENT_UNKNOWN'));
+
+  // Legacy attachment evidence may safely converge without another detail request when it
+  // proves that a positive detected set was completely downloaded.  Zero remains UNKNOWN.
+  const legacyAsset={kind:'file',source_file_id:'file-a',path:'conversations/T_X_files/a.pdf',name:'a.pdf',size_bytes:10};
+  const legacyComplete={...unknownAttachment};
+  delete legacyComplete.attachment_state;
+  Object.assign(legacyComplete,{attachment_detected:1,attachment_downloaded:1,attachment_failed:0,assets:[legacyAsset]});
+  assert.strictEqual(chRecordAttachmentState(legacyComplete),'complete');
+  const legacyCompletePlan=chBuildPreflightPlan([{id:'X',title:'T',update_time:101,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'}],{...scanObs,recordsById:new Map([['X',legacyComplete]])},null,{includeAttachments:true});
+  assert.strictEqual(legacyCompletePlan.items[0].action,'UNCHANGED');
+
+  const legacyPartial={...legacyComplete,attachment_detected:2,attachment_downloaded:1,attachment_failed:1};
+  assert.strictEqual(chRecordAttachmentState(legacyPartial),'partial');
+  const legacyZero={...legacyComplete,attachment_detected:0,attachment_downloaded:0,attachment_failed:0,assets:[]};
+  delete legacyZero.attachments_checked_at;
+  assert.strictEqual(chRecordAttachmentState(legacyZero),'unknown');
+
+  // Missing-only attachment backfill reuses already tracked current-reference assets, fetches
+  // only the missing references, and emits a monotonic completion counter.
+  const originalCollect=collectVisibleAttachments;
+  collectVisibleAttachments=()=>[
+    {kind:'file',fileId:'file-a',messageId:'m1',ownerRole:'user',name:'a.pdf',isImage:false},
+    {kind:'file',fileId:'file-b',messageId:'m2',ownerRole:'user',name:'b.pdf',isImage:false},
+    {kind:'file',fileId:'file-c',messageId:'m3',ownerRole:'user',name:'c.pdf',isImage:false}
+  ];
+  const existingBackfill={asset_dir:'conversations/T_X_files',assets:[
+    {kind:'file',source_file_id:'file-a',path:'conversations/T_X_files/a.pdf',markdown_path:'T_X_files/a.pdf',name:'a.pdf',message_id:'m1',owner_role:'user',size_bytes:10},
+    {kind:'file',source_file_id:'file-c',path:'conversations/T_X_files/c.pdf',markdown_path:'T_X_files/c.pdf',name:'c.pdf',message_id:'m3',owner_role:'user',size_bytes:10}
+  ]};
+  const planBackfill=chPlanAttachmentBackfill({conversation_id:'X'},existingBackfill);
+  assert.strictEqual(planBackfill.retained.length,2);
+  assert.strictEqual(planBackfill.missing.length,1);
+  assert.strictEqual(planBackfill.missing[0].fileId,'file-b');
+  const fetchedAssets=[]; const progressCounts=[];
+  const resultBackfill=await chWriteAttachmentsToDirectory(
+    {getDirectoryHandle:async()=>({})},
+    {conversation_id:'X',title:'T'},
+    null,
+    (p)=>progressCounts.push(p.assetIndex),
+    {
+      targetPrefix:'conversations/',
+      existingRecord:existingBackfill,
+      fetchAttachmentBinary:async(ref)=>{fetchedAssets.push(ref.fileId);return {filename:`${ref.fileId}.pdf`,data:new Uint8Array([1,2,3])};},
+      writeAttachment:async()=>{}
+    }
+  );
+  collectVisibleAttachments=originalCollect;
+  assert.deepStrictEqual(fetchedAssets,['file-b']);
+  assert.strictEqual(resultBackfill.files.length,3);
+  assert.strictEqual(resultBackfill.reusedCount,2);
+  assert.strictEqual(resultBackfill.downloadedNow,1);
+  assert.strictEqual(resultBackfill.attemptedNow,1);
+  assert.deepStrictEqual(progressCounts,[2,3]);
+  assert(progressCounts.every((value,index)=>index===0 || value>=progressCounts[index-1]));
 
 
   // Cleanup removes only old manifest-tracked files and never recursively deletes legacy-untracked assets.

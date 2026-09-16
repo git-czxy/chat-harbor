@@ -74,7 +74,10 @@
     "normal Refresh uses fast validation; Shift+Refresh forces complete refresh",
     "incomplete remote universe cannot establish LOCAL_ONLY",
     "conflicting known archive/project observations preserve unknown rather than inventing a value",
-    "preflight no longer forces the UI into the aggregate pending filter"
+    "preflight no longer forces the UI into the aggregate pending filter",
+    "legacy positive attachment evidence can infer complete/partial without a redundant detail verification",
+    "attachment backfill reuses Manifest-tracked current-reference assets and downloads only missing references",
+    "attachment progress is completion-based and monotonic; one counter advance per attachment attempt"
   ],
   "explicitly_not_in_this_stage": [
     "full localization of every inherited upstream string outside ChatHarbor-owned UI",
@@ -93,7 +96,7 @@
     "remote_absence_requires_complete_universe": true,
     "remote_list_checkpoint": "remote_list_* Manifest observation fields"
   },
-  "integrated_build_version": "0.0.11.3",
+  "integrated_build_version": "0.0.11.4",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,

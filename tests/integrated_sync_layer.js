@@ -534,13 +534,57 @@
         // Keep the launcher free of duplicate percentage/status pills.
     }
 
+    function chPlanAttachmentBackfill(convData, existingRecord = null) {
+        const references = collectVisibleAttachments(convData || {});
+        const assets = Array.isArray(existingRecord?.assets) ? existingRecord.assets : [];
+        const existingByKey = new Map();
+        for (const asset of assets) {
+            const key = chAssetReferenceKey(asset);
+            if (key && asset?.path && !existingByKey.has(key)) existingByKey.set(key, asset);
+        }
+
+        const retained = [];
+        const missing = [];
+        for (const reference of references) {
+            const key = chAttachmentReferenceKey(reference);
+            const asset = key ? existingByKey.get(key) : null;
+            if (asset) retained.push({ reference, asset, key });
+            else missing.push(reference);
+        }
+        return { references, retained, missing };
+    }
+
+    function chExistingAssetAsDownloadedFile(asset, targetPrefix) {
+        const relativeLink = chRelativeMarkdownPath(targetPrefix, asset?.path || '');
+        return {
+            name: asset?.name || 'attachment',
+            path: relativeLink,
+            disk_path: asset?.path || '',
+            root_path: asset?.path || '',
+            kind: asset?.kind || 'file',
+            isImage: Boolean(asset?.is_image),
+            messageId: asset?.message_id || null,
+            ownerRole: asset?.owner_role || null,
+            size_bytes: Number(asset?.size_bytes || 0),
+            source_file_id: asset?.source_file_id || null,
+            source_sandbox_path: asset?.source_sandbox_path || null,
+            reusedExisting: true
+        };
+    }
+
     async function chWriteAttachmentsToDirectory(
         targetDir,
         convData,
         workspaceId,
-        progress = null
+        progress = null,
+        options = {}
     ) {
-        const references = collectVisibleAttachments(convData);
+        const targetPrefix = String(options.targetPrefix || '');
+        const existingRecord = options.existingRecord || null;
+        const fetchBinary = options.fetchAttachmentBinary || fetchAttachmentBinary;
+        const writeBinary = options.writeAttachment || chVerifiedDirectoryWrite;
+        const backfillPlan = chPlanAttachmentBackfill(convData, existingRecord);
+        const references = backfillPlan.references;
         const failures = [];
         const files = [];
         const sandboxPaths = new Map();
@@ -552,42 +596,66 @@
                 files,
                 failures,
                 sandboxPaths,
-                folderName: null
+                folderName: null,
+                assetDirPath: null,
+                reusedCount: 0,
+                downloadedNow: 0,
+                missingBefore: 0
             };
         }
 
         const folderName = generateUniqueFilename(convData).replace(/\.json$/i, '') + '_files';
-        const assetDir = await targetDir.getDirectoryHandle(folderName, { create: true });
+        const missingRefs = backfillPlan.missing;
+        const assetDir = missingRefs.length > 0
+            ? await targetDir.getDirectoryHandle(folderName, { create: true })
+            : null;
 
-        for (let i = 0; i < references.length; i++) {
-            const reference = references[i];
-            if (progress) {
-                progress({
-                    assetIndex: i,
-                    assetTotal: references.length,
-                    name: reference.name || reference.fileId || reference.sandboxPath || 'attachment'
-                });
+        // Reuse every current-reference asset that the Manifest can identify.  This is the
+        // key incremental-attachment invariant: a backfill downloads only the missing set.
+        for (const item of backfillPlan.retained) {
+            const file = chExistingAssetAsDownloadedFile(item.asset, targetPrefix);
+            files.push(file);
+            if (file.name) usedNames.add(file.name);
+            if (item.reference?.kind === 'sandbox' && item.reference?.messageId && item.reference?.sandboxPath) {
+                sandboxPaths.set(`${item.reference.messageId}|${item.reference.sandboxPath}`, file.path);
             }
+        }
 
+        const retainedCount = files.length;
+        if (progress && retainedCount > 0) {
+            progress({
+                assetIndex: retainedCount,
+                assetTotal: references.length,
+                name: `复用已有 ${retainedCount} 个附件`,
+                reusedCount: retainedCount,
+                downloadedNow: 0
+            });
+        }
+
+        for (let i = 0; i < missingRefs.length; i++) {
+            const reference = missingRefs[i];
             try {
-                const downloaded = await fetchAttachmentBinary(reference, convData, workspaceId);
+                const downloaded = await fetchBinary(reference, convData, workspaceId);
                 const filename = uniqueAttachmentName(downloaded.filename, usedNames);
-                await chVerifiedDirectoryWrite(assetDir, filename, downloaded.data);
+                await writeBinary(assetDir, filename, downloaded.data);
 
                 const diskPath = `${folderName}/${filename}`;
+                const rootPath = `${targetPrefix}${diskPath}`;
                 const relativePath = encodeRelativePath(diskPath);
 
                 files.push({
                     name: filename,
                     path: relativePath,
                     disk_path: diskPath,
+                    root_path: rootPath,
                     kind: reference.kind,
                     isImage: reference.isImage,
                     messageId: reference.messageId,
                     ownerRole: reference.ownerRole,
                     size_bytes: chExpectedByteLength(downloaded.data),
                     source_file_id: reference.fileId || null,
-                    source_sandbox_path: reference.sandboxPath || null
+                    source_sandbox_path: reference.sandboxPath || null,
+                    reusedExisting: false
                 });
 
                 if (reference.kind === 'sandbox') {
@@ -604,23 +672,36 @@
                 });
             }
 
+            // Progress is completion-based and monotonic.  Do not emit a second "before"
+            // value for the same attachment; the counter advances exactly once per attempt.
             if (progress) {
                 progress({
-                    assetIndex: i + 1,
+                    assetIndex: retainedCount + i + 1,
                     assetTotal: references.length,
-                    name: reference.name || reference.fileId || reference.sandboxPath || 'attachment'
+                    name: reference.name || reference.fileId || reference.sandboxPath || 'attachment',
+                    reusedCount: retainedCount,
+                    downloadedNow: i + 1
                 });
             }
 
             await sleep(150);
         }
 
+        const primaryAssetDir = missingRefs.length > 0
+            ? `${targetPrefix}${folderName}`
+            : (existingRecord?.asset_dir || (files[0]?.root_path ? chPathDirname(files[0].root_path) : null));
+
         return {
             detected: references.length,
             files,
             failures,
             sandboxPaths,
-            folderName
+            folderName,
+            assetDirPath: primaryAssetDir,
+            reusedCount: retainedCount,
+            downloadedNow: files.length - retainedCount,
+            attemptedNow: missingRefs.length,
+            missingBefore: missingRefs.length
         };
     }
 
@@ -731,7 +812,8 @@
                         detail: `${assetIndex}/${assetTotal} · ${name}`,
                         fraction: 0.15 + ratio * 0.55
                     });
-                }
+                },
+                { targetPrefix: relativePrefix, existingRecord }
             );
         } else if (preserveExistingAssets) {
             attachmentResult = existingAttachmentResultOverride || chExistingAttachmentResult(existingRecord);
@@ -794,16 +876,12 @@
 
         const assetDir = preserveExistingAssets
             ? (existingRecord.asset_dir || null)
-            : (
-                attachmentResult?.folderName
-                    ? `${relativePrefix}${attachmentResult.folderName}`
-                    : null
-            );
+            : (attachmentResult?.assetDirPath || (attachmentResult?.folderName ? `${relativePrefix}${attachmentResult.folderName}` : null));
 
         const assets = preserveExistingAssets
             ? (Array.isArray(existingRecord.assets) ? existingRecord.assets : [])
             : (attachmentResult?.files || []).map(file => ({
-                path: `${relativePrefix}${file.disk_path}`,
+                path: file.root_path || `${relativePrefix}${file.disk_path}`,
                 markdown_path: file.path,
                 name: file.name,
                 kind: file.kind,
@@ -1074,10 +1152,35 @@
         };
     }
 
+    function chInferLegacyAttachmentState(record) {
+        if (!record || typeof record !== 'object') return 'unknown';
+        const assets = Array.isArray(record.assets) ? record.assets : [];
+        const detected = Number(record.attachment_detected);
+        const downloaded = Number(record.attachment_downloaded);
+        const failed = Number(record.attachment_failed);
+        const countsKnown = [detected, downloaded, failed].every(Number.isFinite);
+
+        // A positive legacy detected count proves that the detail was inspected.  When all
+        // detected assets were downloaded, no failures remain, and the Manifest tracks at
+        // least that many files, the old record is strong enough to upgrade to COMPLETE
+        // without another network verification.
+        if (countsKnown && detected > 0) {
+            if (failed === 0 && downloaded >= detected && assets.length >= detected) return 'complete';
+            if (downloaded > 0 || failed > 0 || assets.length > 0) return 'partial';
+            return 'not_downloaded';
+        }
+
+        // Zero in old manifests is ambiguous: it can mean "none" or "not inspected".
+        // Only a newer explicit checked-at marker makes zero safe to interpret as NONE.
+        if (countsKnown && detected === 0 && record.attachments_checked_at) return 'none';
+        if (assets.length > 0) return 'partial';
+        return 'unknown';
+    }
+
     function chRecordAttachmentState(record) {
         const value = String(record?.attachment_state || '').toLowerCase();
         if (['unknown','none','complete','partial','not_downloaded'].includes(value)) return value;
-        return 'unknown';
+        return chInferLegacyAttachmentState(record);
     }
 
     function chAttachmentReferenceKey(ref) {
