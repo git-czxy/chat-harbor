@@ -1,5 +1,14 @@
 # ChatHarbor Changelog
 
+## 0.0.9.3 — 2026-09-14
+
+### Changed
+- Clarified per-conversation runtime progress from `同步 1 / N` to `当前第 1 / N 条`, so the number is not mistaken for a completed/succeeded counter.
+- `已归档` now uses a pale amber badge (`#fef3c7` / `#92400e`); `未归档` remains neutral gray. This keeps archive state visually distinct from synchronization-status colors.
+
+### No core behavior change
+- Planner, detail verification, streaming commit, Manifest, conservative pacing, countdown, pause/resume/cancel and cleanup semantics are unchanged from 0.0.9.2.
+
 This changelog records user-visible behavior and important runtime/safety changes. Fine-grained implementation history should remain in Git commits; GitHub Release notes can summarize each stable milestone.
 
 ## 0.0.9.2 — 2026-09-14

@@ -521,7 +521,7 @@ directory_writer = r'''
         const pct = chProgressPercent(conversationIndex, conversationTotal, fraction);
         const shortTitle = String(title || 'Untitled Conversation').slice(0, 42);
         chSetProgress(
-            `同步 ${conversationIndex + 1} / ${conversationTotal} · ${phase}`,
+            `当前第 ${conversationIndex + 1} / ${conversationTotal} 条 · ${phase}`,
             detail ? `${shortTitle} · ${detail}` : shortTitle,
             pct
         );
@@ -2729,7 +2729,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.9.2 Cached Remote Index + Compact Rail UI ========================
+# ======================== ChatHarbor 0.0.9.3 UI Clarity Hotfix ========================
 # The sync/runtime core above remains unchanged. This final bounded patch replaces only the
 # picker presentation, report presentation, and launcher presentation.
 
@@ -3098,7 +3098,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                 content.append(title,meta);row.append(cb,content);
                 const badges=document.createElement('div');badges.style.cssText='display:flex;gap:5px;align-items:center;justify-content:flex-end;flex-wrap:wrap;';
                 const s=state.syncStatusById.get(item.id);if(s){const [bg,fg]=statusColor(s);const badge=document.createElement('span');badge.textContent=statusLabel(s);badge.style.cssText=`font-size:11px;padding:3px 7px;border-radius:999px;background:${bg};color:${fg};white-space:nowrap;`;badges.appendChild(badge);}
-                const archiveBadge=document.createElement('span');archiveBadge.textContent=item.is_archived?chT('已归档','Archived'):chT('未归档','Active');archiveBadge.style.cssText=item.is_archived?'font-size:11px;padding:3px 7px;border-radius:999px;background:#e5e7eb;color:#374151;white-space:nowrap;':'font-size:11px;padding:3px 7px;border-radius:999px;background:#f3f4f6;color:#6b7280;white-space:nowrap;';badges.appendChild(archiveBadge);
+                const archiveBadge=document.createElement('span');archiveBadge.textContent=item.is_archived?chT('已归档','Archived'):chT('未归档','Active');archiveBadge.style.cssText=item.is_archived?'font-size:11px;padding:3px 7px;border-radius:999px;background:#fef3c7;color:#92400e;white-space:nowrap;':'font-size:11px;padding:3px 7px;border-radius:999px;background:#f3f4f6;color:#6b7280;white-space:nowrap;';badges.appendChild(archiveBadge);
                 row.appendChild(badges);listEl.appendChild(row);
             });
             if(state.filtered.length>state.visibleCount){const more=document.createElement('button');more.textContent=`${chT('加载更多','Load more')} (${state.filtered.length-state.visibleCount})`;more.style.cssText='width:100%;padding:7px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;';more.onclick=()=>{state.visibleCount=Math.min(state.visibleCount+state.pageSize,state.filtered.length);renderList();};listEl.appendChild(more);}

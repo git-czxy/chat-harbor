@@ -88,7 +88,7 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.9.2' in source
+assert '0.0.9.3' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';" in source
 assert 'background: #10a37f;' in source
 assert 'fabCollapseTimer = setTimeout' in source
@@ -128,3 +128,7 @@ print('CORE_SHA256', hashlib.sha256(core.encode()).hexdigest())
 assert '下一批前暂停约' not in core
 assert '剩余 ${chFormatRemainingDuration(remaining)}' in core
 print('PASS live MM:SS batch-pause countdown markers')
+
+assert '当前第 ${conversationIndex + 1} / ${conversationTotal} 条 · ${phase}' in core
+assert 'background:#fef3c7;color:#92400e' in picker
+print('PASS current-item progress wording + archived amber badge')
