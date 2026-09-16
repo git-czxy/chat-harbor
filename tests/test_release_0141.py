@@ -6,8 +6,8 @@ import tempfile
 ROOT=pathlib.Path(__file__).resolve().parents[1]
 patch=(ROOT/'ChatHarbor_IntegratedSync_patch.py').read_text(encoding='utf-8')
 prepare=(ROOT/'prepare_clean_integrated_sync.ps1').read_text(encoding='utf-8')
-assert '// @version      0.0.14.0' in patch
-assert 'ChatHarbor-IntegratedSync-0.0.14.0.user.js' in prepare
+assert '// @version      0.0.14.1' in patch
+assert 'ChatHarbor-IntegratedSync-0.0.14.1.user.js' in prepare
 assert "chatharbor_network_policy_v2" in patch
 assert "大量任务（更稳）" in patch and "保守模式（最稳）" in patch
 assert "batchSize: 10" in patch and "batchPauseMinSec: 120" in patch and "batchPauseMaxSec: 180" in patch
@@ -44,6 +44,6 @@ for marker in [
     "record.attachment_state = 'partial'", 'onItemFailed', 'partial-root', 'partial-projects'
 ]:
     assert marker in core, marker
-for marker in ['userStatus = value =>', "SYNCED: chT('已同步'", "PENDING: chT('待同步'", "CONFIRM: chT('需确认'", "ERROR: chT('异常'", 'restoreSavedRoot()', '!state.rootHandle || state.selected.size===0']:
+for marker in ['userStatus = value =>', "SYNCED: chT('已同步'", "PENDING: chT('待同步'", "CONFIRM: chT('需确认'", "ERROR: chT('异常'", 'restoreSavedRoot()', '!state.rootHandle || state.selected.size===0', '全选当前结果', '第一步：选择本地保存位置', '选择保存位置后可同步', '云端对话已加载']:
     assert marker in picker, marker
-print('PASS 0.0.14.0 release invariants + injected JS syntax')
+print('PASS 0.0.14.1 release invariants + injected JS syntax')

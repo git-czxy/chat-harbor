@@ -2031,11 +2031,13 @@
             includeAttachments
         });
         const s = plan.summary;
-        chSetProgress(
-            '快速检查完成',
-            `NEW ${s.newCount} · 待核验 ${s.maximumFetchRequired - s.newCount} · UNCHANGED ${s.unchangedCount} · LOCAL_ONLY ${s.localOnlyReliable ? s.localOnlyCount : 'UNKNOWN'}`,
-            100
-        );
+        const pending = Math.max(0, Number(s.maximumFetchRequired || 0));
+        const confirm = Math.max(0, Number(s.rawOnlyVerifyCount || 0)) + (s.localOnlyReliable ? Math.max(0, Number(s.localOnlyCount || 0)) : 0);
+        const issues = Math.max(0, Number(s.errorCount || 0) + Number(s.duplicateIdCount || 0));
+        const summaryParts = [`${chT('待同步','To sync')} ${pending}`, `${chT('已同步','Synced')} ${s.unchangedCount || 0}`];
+        if (confirm) summaryParts.push(`${chT('需确认','Check')} ${confirm}`);
+        if (issues) summaryParts.push(`${chT('异常','Error')} ${issues}`);
+        chSetProgress(chT('快速检查完成','Quick check complete'), summaryParts.join(' · '), 100);
         chShowPreflightReport(plan);
         console.log('[ChatHarbor Integrated Sync] Preflight plan (read-only):', { localScan, plan });
         return { localScan, plan };

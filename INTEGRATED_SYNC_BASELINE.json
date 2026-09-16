@@ -1,8 +1,8 @@
 {
   "product": "ChatHarbor",
-  "build": "User-facing UX Convergence + Safer Request Presets + Typed Retry + Lane-aware Scheduler + Archive Layout v2",
+  "build": "0.0.14.1 First-use Guidance + Filter-scoped Selection + User-facing UX Convergence + Safer Request Presets + Typed Retry + Lane-aware Scheduler + Archive Layout v2",
   "status": "AUTOMATED_REGRESSION_PASS_REAL_UI_AND_LIVE_ENDPOINT_SMOKE_REQUIRED",
-  "date": "2026-09-15",
+  "date": "2026-09-16",
   "clean_upstream": {
     "repository": "huhusmang/ChatGPT-Exporter",
     "commit": "efa1f0f266d15c053af4ab4607b948a06332d9f7",
@@ -92,7 +92,11 @@
     "use-case request presets: 4-7s/15/60-90, 8-12s/12/90-120, 12-18s/10/120-180, 18-25s/8/180-300",
     "default large-task preset: 12-18s detail cadence, 10 items/batch, 120-180s break",
     "attachment metadata cadence 3-5s with 10-request micro-batch and 30-60s break",
-    "HTTP 429 global cooldown 300s × attempt plus adaptive 50% lane slowdown per observed 429 (capped)"
+    "HTTP 429 global cooldown 300s × attempt plus adaptive 50% lane slowdown per observed 429 (capped)",
+    "first-use local-save guidance with explicit next action and no hidden directory picker from sync",
+    "brief remote-list completion acknowledgement after progressive loading finishes",
+    "selection is pruned to the current filter/search result; select-all never keeps hidden selections",
+    "normal quick-check completion uses only user-facing status vocabulary"
   ],
   "explicitly_not_in_this_stage": [
     "full localization of every inherited upstream string outside ChatHarbor-owned UI",
@@ -111,7 +115,7 @@
     "remote_absence_requires_complete_universe": true,
     "remote_list_checkpoint": "remote_list_* Manifest observation fields"
   },
-  "integrated_build_version": "0.0.14.0",
+  "integrated_build_version": "0.0.14.1",
   "runtime_control": {
     "default_speed": "12000ms base + 0-6000ms jitter (大量任务 / 更稳)",
     "default_batch_size": 10,

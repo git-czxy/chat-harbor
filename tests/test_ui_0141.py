@@ -62,4 +62,23 @@ assert 'chNetworkPolicyDetail' in source
 assert "chT('本地检查详情','Local check details')" in pre
 assert "chT('选择','Selected')" in report and "chT('实际处理','Processed')" in report
 assert "chT('需确认','Check')" in report
-print('PASS 0.0.14.0 user-facing UX convergence invariants')
+
+# 0.0.14.1 first-use guidance and selection scope follow the visible result.
+for marker in ['第一步：选择本地保存位置','选择保存位置后可同步','全选当前结果','云端对话已加载','已获取']:
+    assert marker in picker, marker
+assert "const filteredIds = new Set(state.filtered.map(item => item.id));" in picker
+assert "if (!filteredIds.has(id)) state.selected.delete(id);" in picker
+assert "preflightBtn.style.display = state.rootHandle ? '' : 'none'" in picker
+assert "chooseDirBtn.style.background = needsSaveLocation ? '#eef2ff' : '#fff'" in picker
+assert "remoteLoadedNoticeUntil" in picker and "announceRemoteLoaded" in picker
+
+# The normal quick-check completion card no longer leaks technical state names.
+quick_start=core.index("const pending = Math.max(0, Number(s.maximumFetchRequired || 0));")
+quick_end=core.index("chShowPreflightReport(plan);", quick_start)
+quick=core[quick_start:quick_end]
+for technical in ['NEW ', 'UNCHANGED ', 'LOCAL_ONLY ', '待核验']:
+    assert technical not in quick, technical
+for label in ['待同步','已同步','需确认','异常']:
+    assert label in quick
+
+print('PASS 0.0.14.1 UX follow-up invariants')

@@ -35,7 +35,7 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.14.0\n"
+    "// @version      0.0.14.1\n"
     "// @description  ChatHarbor local-first ChatGPT conversation sync with safe incremental updates, attachment recovery, conservative request pacing, and simple user-facing status.\n"
     "// @description:zh-CN ChatHarbor 本地优先的 ChatGPT 对话同步：安全增量更新、附件补齐、保守请求节奏和简明状态展示。\n"
     "// @author       huhu; ChatHarbor contributors\n"
@@ -2078,11 +2078,13 @@ directory_writer = r'''
             includeAttachments
         });
         const s = plan.summary;
-        chSetProgress(
-            '快速检查完成',
-            `NEW ${s.newCount} · 待核验 ${s.maximumFetchRequired - s.newCount} · UNCHANGED ${s.unchangedCount} · LOCAL_ONLY ${s.localOnlyReliable ? s.localOnlyCount : 'UNKNOWN'}`,
-            100
-        );
+        const pending = Math.max(0, Number(s.maximumFetchRequired || 0));
+        const confirm = Math.max(0, Number(s.rawOnlyVerifyCount || 0)) + (s.localOnlyReliable ? Math.max(0, Number(s.localOnlyCount || 0)) : 0);
+        const issues = Math.max(0, Number(s.errorCount || 0) + Number(s.duplicateIdCount || 0));
+        const summaryParts = [`${chT('待同步','To sync')} ${pending}`, `${chT('已同步','Synced')} ${s.unchangedCount || 0}`];
+        if (confirm) summaryParts.push(`${chT('需确认','Check')} ${confirm}`);
+        if (issues) summaryParts.push(`${chT('异常','Error')} ${issues}`);
+        chSetProgress(chT('快速检查完成','Quick check complete'), summaryParts.join(' · '), 100);
         chShowPreflightReport(plan);
         console.log('[ChatHarbor Integrated Sync] Preflight plan (read-only):', { localScan, plan });
         return { localScan, plan };
@@ -3611,7 +3613,8 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             accountUniverse: null, accountUniverseComplete: false, accountUniverseNote: null,
             accountLoadedAt: null, teamUniverseCache: new Map(), remoteCacheMeta: null,
             remoteRefreshPromise: null, pendingRemoteSnapshot: null, remoteRefreshGeneration: 0, remoteAppliedValidatedAt: 0,
-            loadingMessage: chT('正在加载云端对话…','Loading cloud conversations…')
+            loadingMessage: chT('正在加载云端对话…','Loading cloud conversations…'),
+            remoteLoadedNoticeUntil: 0, remoteLoadedNoticeTimer: null
         };
 
         const userStatus = value => {
@@ -3678,7 +3681,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             <div style="display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:12px; padding:12px 14px 14px; flex:1 1 auto; min-height:0; background:#f8fafc;">
                 <section style="min-width:0; min-height:0; display:flex; flex-direction:column;">
                     <div style="display:flex; justify-content:flex-start; align-items:center; gap:0; margin-bottom:8px; flex:0 0 auto; min-height:22px;">
-                        <label style="display:flex;align-items:center;gap:6px;min-width:72px;font-size:12px;color:#374151;cursor:pointer;white-space:nowrap;"><input id="select-all-checkbox" type="checkbox"><span>${chT('全选','Select all')}</span></label>
+                        <label style="display:flex;align-items:center;gap:6px;min-width:72px;font-size:12px;color:#374151;cursor:pointer;white-space:nowrap;"><input id="select-all-checkbox" type="checkbox"><span id="select-all-label">${chT('全选','Select all')}</span></label>
                         <div id="conv-status" style="margin-left:24px;font-size:12px;color:#6b7280;white-space:nowrap;">${chT('正在加载列表…','Loading…')}</div>
                     </div>
                     <div id="conv-list" style="flex:1 1 auto; min-height:0; overflow:auto; border:1px solid #e5e7eb; border-radius:9px; padding:8px; background:#fff;"></div>
@@ -3687,8 +3690,8 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                     <div id="ch-right-scroll" style="min-height:0; flex:1 1 auto; overflow:auto; display:flex; flex-direction:column; gap:9px; padding-right:1px;">
                         <div style="padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
                             <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;"><strong style="font-size:13px;">${chT('本地保存','Local save')}</strong><button id="ch-archive-copy-report-btn" style="display:none;padding:3px 7px;border:1px solid #d1d5db;border-radius:6px;background:#fff;color:#6b7280;cursor:pointer;font-size:11px;">${chT('详情','Details')}</button></div>
-                            <div id="ch-archive-path" style="margin-top:6px; font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${chT('尚未选择目录','No directory selected')}</div>
-                            <div id="ch-archive-summary" style="margin-top:6px; font-size:12px; line-height:1.55; color:#4b5563;">${chT('等待选择目录','Waiting for directory')}</div>
+                            <div id="ch-archive-path" style="margin-top:6px; font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${chT('第一步：选择本地保存位置','Step 1: choose a local save location')}</div>
+                            <div id="ch-archive-summary" style="margin-top:6px; font-size:12px; line-height:1.55; color:#4b5563;">${chT('选好后会自动检查已有文件。','Existing files will be checked automatically.')}</div>
                             <div style="display:flex; gap:6px; margin-top:8px;"><button id="ch-choose-directory-btn" style="flex:1; padding:7px 8px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer;">${chT('选择目录','Choose')}</button><button id="preflight-plan-btn" style="flex:1; padding:7px 8px; border:1px solid #6366f1; border-radius:6px; background:#fff; color:#4338ca; cursor:pointer; font-weight:600;">${chT('重新检查','Check again')}</button></div>
                             <button id="ch-migrate-layout-btn" style="display:none;width:100%;margin-top:7px;padding:8px 10px;border:1px solid #d97706;border-radius:7px;background:#fffbeb;color:#92400e;cursor:pointer;font-weight:700;">${chT('升级本地保存结构','Upgrade local save structure')}</button>
                         </div>
@@ -3751,6 +3754,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         const migrateLayoutBtn = $('ch-migrate-layout-btn');
         const syncSelectedBtn = $('sync-directory-btn');
         const selectAllCheckbox = $('select-all-checkbox');
+        const selectAllLabel = $('select-all-label');
         const refreshBtn = $('ch-refresh-btn');
         const closeBtn = $('back-btn');
         const pauseSyncBtn = $('ch-pause-sync-btn');
@@ -3835,13 +3839,21 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                 const tb=normalizeEpochSeconds(state.timeField==='create'?b.create_time:b.update_time)||0;
                 return state.sort==='asc' ? ta-tb : tb-ta;
             });
+            // Selection always follows the result the user can currently see.
+            const filteredIds = new Set(state.filtered.map(item => item.id));
+            for (const id of Array.from(state.selected)) if (!filteredIds.has(id)) state.selected.delete(id);
+            state.lastSelectedIndex = null;
             state.visibleCount = state.pageSize;
         };
+        const hasActiveFilters = () => Boolean(
+            state.query.trim() || state.projectFilter !== 'all' || state.archived !== 'all' ||
+            state.syncStatus !== 'all' || state.timeRange !== 'all'
+        );
         const updateArchiveSummary = () => {
-            $('ch-archive-path').textContent = state.rootHandle?.name ? `${chT('保存到','Save to')}：${state.rootHandle.name}` : state.savedRootHandle ? chT('上次保存位置需要重新授权','Previous save location needs permission') : chT('尚未选择保存位置','No save location selected');
+            $('ch-archive-path').textContent = state.rootHandle?.name ? `${chT('保存到','Save to')}：${state.rootHandle.name}` : state.savedRootHandle ? chT('需要继续使用上次保存位置','Continue with the previous save location') : chT('第一步：选择本地保存位置','Step 1: choose a local save location');
             const layout = state.layoutState;
             if (!state.rootHandle) {
-                $('ch-archive-summary').textContent = state.savedRootHandle ? chT('点击“继续使用”恢复上次位置','Click “Continue” to restore the previous location') : chT('选择后会自动检查本地文件','Local files are checked automatically after selection');
+                $('ch-archive-summary').textContent = state.savedRootHandle ? chT('点击“继续使用”后会自动检查已有文件。','Click “Continue” and existing files will be checked automatically.') : chT('选好后会自动检查已有文件。','Existing files will be checked automatically.');
             } else if (layout?.requiresMigration) {
                 $('ch-archive-summary').textContent = `${chT('本地保存结构需要升级','Local save structure needs an upgrade')} · ${chT('共','Total')} ${layout.total || 0}`;
             } else if (!state.lastPlan) {
@@ -3885,19 +3897,29 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             chooseDirBtn.disabled = chSyncRun.active || state.migrationActive;
             chooseDirBtn.textContent = state.rootHandle ? chT('更换目录','Change location') : state.savedRootHandle ? chT('继续使用','Continue') : chT('选择位置','Choose location');
             chooseDirBtn.title = state.rootHandle ? chT('切换本地保存位置。','Change the local save location.') : '';
+            const needsSaveLocation = !state.rootHandle;
+            chooseDirBtn.style.borderColor = needsSaveLocation ? '#4f46e5' : '#d1d5db';
+            chooseDirBtn.style.background = needsSaveLocation ? '#eef2ff' : '#fff';
+            chooseDirBtn.style.color = needsSaveLocation ? '#3730a3' : '#111827';
+            chooseDirBtn.style.fontWeight = needsSaveLocation ? '700' : '400';
+            preflightBtn.style.display = state.rootHandle ? '' : 'none';
             preflightBtn.disabled = chSyncRun.active || state.migrationActive || !state.rootHandle;
             if (migrateLayoutBtn) migrateLayoutBtn.disabled = disabled || !migrationRequired;
             if (selectAllCheckbox) selectAllCheckbox.disabled = disabled || state.filtered.length===0 || migrationRequired;
             syncSelectedBtn.disabled = disabled || migrationRequired || !state.rootHandle || state.selected.size===0;
-            syncSelectedBtn.style.opacity = syncSelectedBtn.disabled ? '.45' : '1';
+            syncSelectedBtn.style.opacity = syncSelectedBtn.disabled ? '.50' : '1';
             syncSelectedBtn.textContent = migrationRequired
                 ? chT('请先升级本地保存','Upgrade local save first')
-                : state.selected.size ? `${chT('同步选中','Sync selected')} ${state.selected.size}` : chT('请选择对话','Select conversations');
+                : !state.rootHandle
+                    ? (state.savedRootHandle ? chT('继续使用保存位置后可同步','Continue the save location to sync') : chT('选择保存位置后可同步','Choose a save location to sync'))
+                    : state.selected.size ? `${chT('同步选中','Sync selected')} ${state.selected.size}` : chT('请选择对话','Select conversations');
         };
         const renderList = () => {
             const listEl=$('conv-list'), statusEl=$('conv-status');
             listEl.innerHTML='';
             updateControls(); updateArchiveSummary();
+            statusEl.style.background='transparent'; statusEl.style.color='#6b7280'; statusEl.style.padding='0'; statusEl.style.borderRadius='0';
+            if(selectAllLabel) selectAllLabel.textContent = hasActiveFilters() ? chT('全选当前结果','Select current results') : chT('全选','Select all');
             if(state.loading && !state.list.length){statusEl.textContent=state.loadingMessage||chT('正在加载云端对话…','Loading cloud conversations…');if(selectAllCheckbox){selectAllCheckbox.checked=false;selectAllCheckbox.indeterminate=false;}return;}
             const matchedSelected = state.filtered.reduce((n,item)=>n+(state.selected.has(item.id)?1:0),0);
             if(selectAllCheckbox){selectAllCheckbox.checked=state.filtered.length>0&&matchedSelected===state.filtered.length;selectAllCheckbox.indeterminate=matchedSelected>0&&matchedSelected<state.filtered.length;}
@@ -3905,7 +3927,14 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             const countParts=[`${chT('已选','Selected')} ${state.selected.size}`];
             if(state.filtered.length!==providerTotal) countParts.push(`${chT('当前','Current')} ${state.filtered.length} / ${chT('共','Total')} ${providerTotal}`);
             else countParts.push(`${chT('共','Total')} ${providerTotal}`);
-            statusEl.textContent=state.loading ? `${state.loadingMessage||chT('云端对话加载中','Remote index loading')} · ${countParts.join(' · ')}` : countParts.join(' · ');
+            if(state.loading){
+                statusEl.textContent = `${state.loadingMessage||chT('正在加载云端对话…','Loading cloud conversations…')}${providerTotal?` · ${chT('已获取','Loaded')} ${providerTotal} ${chT('条','items')}`:''} · ${countParts.join(' · ')}`;
+            } else if (state.remoteLoadedNoticeUntil > Date.now()) {
+                statusEl.textContent = `✓ ${chT('云端对话已加载','Cloud conversations loaded')} · ${chT('共','Total')} ${providerTotal} ${chT('条','items')}`;
+                statusEl.style.background='#ecfdf5'; statusEl.style.color='#047857'; statusEl.style.padding='2px 8px'; statusEl.style.borderRadius='999px';
+            } else {
+                statusEl.textContent = countParts.join(' · ');
+            }
             if(!state.filtered.length){const e=document.createElement('div');e.textContent=chT('没有匹配的对话。','No matching conversations.');e.style.cssText='color:#9ca3af;padding:12px 8px;';listEl.appendChild(e);return;}
             state.filtered.slice(0,state.visibleCount).forEach((item,index)=>{
                 const row=document.createElement('label');
@@ -4005,6 +4034,16 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             if(info.message)return info.message;
             return chT('正在加载云端对话…','Loading cloud conversations…');
         };
+        const announceRemoteLoaded = () => {
+            state.remoteLoadedNoticeUntil = Date.now() + 1400;
+            if (state.remoteLoadedNoticeTimer) clearTimeout(state.remoteLoadedNoticeTimer);
+            renderList();
+            state.remoteLoadedNoticeTimer = setTimeout(() => {
+                state.remoteLoadedNoticeUntil = 0;
+                state.remoteLoadedNoticeTimer = null;
+                if (document.body.contains(overlay) && !state.loading) renderList();
+            }, 1450);
+        };
         const startRemoteRefresh = async (ws, options={}) => {
             if(state.remoteRefreshPromise)return state.remoteRefreshPromise;
             const generation=++state.remoteRefreshGeneration;
@@ -4047,11 +4086,11 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                     // cache never proves LOCAL_ONLY and is always refreshed in the background.
                     if(cached&&Array.isArray(cached.list)&&cached.list.length){
                         applyRemoteSnapshot({...cached,refreshMode:cached.complete?'persistent-cache':'persistent-cache-incomplete'}); state.loading=false; renderAll(); if(state.rootHandle)await runPreflight(true);
-                        void (async()=>{try{const fresh=await startRemoteRefresh(ws);await applyRemoteSnapshotSafely(fresh);}catch(err){console.warn('[ChatHarbor] background remote refresh failed',err);}})();
+                        void (async()=>{try{const fresh=await startRemoteRefresh(ws);const applied=await applyRemoteSnapshotSafely(fresh);if(applied)announceRemoteLoaded();}catch(err){console.warn('[ChatHarbor] background remote refresh failed',err);}})();
                         return;
                     }
                 }
-                const snapshot=await startRemoteRefresh(ws,{forceFull:Boolean(forceFull)}); applyRemoteSnapshot(snapshot); state.loading=false;state.loadingMessage=''; renderAll(); if(state.rootHandle)await runPreflight(true);
+                const snapshot=await startRemoteRefresh(ws,{forceFull:Boolean(forceFull)}); applyRemoteSnapshot(snapshot); state.loading=false;state.loadingMessage=''; renderAll(); announceRemoteLoaded(); if(state.rootHandle)await runPreflight(true);
             }catch(err){state.loading=false;state.loadingMessage='';if(!state.remoteUniverse.length){state.list=[];state.filtered=[];state.remoteUniverse=[];}$('conv-status').textContent=`${chT('加载失败','Load failed')}: ${err.message}`;renderList();}
         };
         const ensureRemoteFreshForSync = async () => {
@@ -4376,6 +4415,10 @@ required_runtime_markers = [
     "function chPlanAttachmentBackfill",
     "Progress is completion-based and monotonic",
     "Reuse only assets whose Manifest identity and physical file both remain valid",
+    "全选当前结果",
+    "第一步：选择本地保存位置",
+    "选择保存位置后可同步",
+    "云端对话已加载",
 ]
 missing_runtime_markers = [marker for marker in required_runtime_markers if marker not in text]
 if missing_runtime_markers:

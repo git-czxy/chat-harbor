@@ -1,5 +1,29 @@
 # ChatHarbor Changelog
 
+## 0.0.14.1 — 2026-09-16
+
+### First-use guidance
+- When no save location is available, the Local Save card now explicitly says **第一步：选择本地保存位置** and highlights **选择位置** as the next action.
+- **重新检查** is hidden until a save location exists.
+- The disabled primary action now says **选择保存位置后可同步** (or asks the user to continue the previous location when permission must be restored).
+
+### Cloud-list completion feedback
+- Progressive remote loading now exposes the number already obtained while pages/projects are still loading.
+- A completed remote refresh briefly shows **✓ 云端对话已加载 · 共 N 条** with a light green highlight, then returns to the normal selection count.
+- The completion cue happens once per completed refresh, not once per 100-item page.
+
+### Selection semantics fixed
+- Selection is now constrained to the current visible filter/search result. Hidden items are removed from the active selection whenever the result scope changes.
+- With filters active, the checkbox label becomes **全选当前结果**; without filters it remains **全选**.
+- The primary sync button therefore always reflects the actual number that will be processed.
+
+### Plain-language quick-check summary
+- Removed `NEW / UNCHANGED / LOCAL_ONLY / 待核验` from the normal quick-check completion card.
+- The normal card now uses only **待同步 / 已同步 / 需确认 / 异常**; technical counts remain in Details/diagnostics.
+
+### Preserved
+- No sync-engine, network-preset, Manifest, attachment, Archive Layout v2, transaction-safety, or retry-policy behavior was changed in this follow-up.
+
 ## 0.0.14.0 — 2026-09-15
 
 ### User-facing UX convergence
@@ -23,6 +47,7 @@
 
 ### Preserved
 - Archive Layout v2, Manifest authority, content-signature verification, progressive cloud discovery, lane-aware scheduler, typed HTTP retry, missing-only attachment backfill, commit-accurate state, pause/resume/cancel and tracked-only cleanup remain intact.
+
 
 ## 0.0.13.1 — 2026-09-15
 
