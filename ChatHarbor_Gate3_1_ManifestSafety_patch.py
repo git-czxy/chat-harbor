@@ -10,11 +10,11 @@ def git_blob_sha1(data: bytes) -> str:
     return hashlib.sha1(header + data).hexdigest()
 
 if len(sys.argv) < 2:
-    print("Usage: python ChatHarbor_Gate3_ManifestIdentity_patch.py <Tampermonkey.js> [output.user.js]")
+    print("Usage: python ChatHarbor_Gate3_1_ManifestSafety_patch.py <Tampermonkey.js> [output.user.js]")
     raise SystemExit(2)
 
 src = Path(sys.argv[1])
-out = Path(sys.argv[2]) if len(sys.argv) > 2 else src.with_name("ChatHarbor-Gate3.user.js")
+out = Path(sys.argv[2]) if len(sys.argv) > 2 else src.with_name("ChatHarbor-Gate3.1.user.js")
 raw = src.read_bytes()
 
 actual_blob = git_blob_sha1(raw)
@@ -33,11 +33,11 @@ text = text.replace(
     "// @version      1.5.0\n"
     "// @description  Export ChatGPT conversations with visible uploads and generated files as JSON+Markdown ZIP backups.\n"
     "// @author       huhu\n",
-    "// @name         ChatHarbor Gate 3 (Clean Lineage)\n"
-    "// @name:zh-CN   ChatHarbor Gate 3（干净来源测试版）\n"
-    "// @version      0.0.3-gate3\n"
-    "// @description  Clean-lineage manifest and identity test based on huhusmang/ChatGPT-Exporter.\n"
-    "// @description:zh-CN 基于 huhusmang/ChatGPT-Exporter 的干净来源 Manifest 与身份测试版。\n"
+    "// @name         ChatHarbor Gate 3.1 (Clean Lineage)\n"
+    "// @name:zh-CN   ChatHarbor Gate 3.1（干净来源测试版）\n"
+    "// @version      0.0.3.1\n"
+    "// @description  Clean-lineage manifest safety and non-blocking progress test based on huhusmang/ChatGPT-Exporter.\n"
+    "// @description:zh-CN 基于 huhusmang/ChatGPT-Exporter 的干净来源 Manifest 安全与非阻塞进度测试版。\n"
     "// @author       huhu; ChatHarbor contributors\n"
 )
 
@@ -287,7 +287,9 @@ directory_writer = r'''
                     isImage: reference.isImage,
                     messageId: reference.messageId,
                     ownerRole: reference.ownerRole,
-                    size_bytes: chExpectedByteLength(downloaded.data)
+                    size_bytes: chExpectedByteLength(downloaded.data),
+                    source_file_id: reference.fileId || null,
+                    source_sandbox_path: reference.sandboxPath || null
                 });
 
                 if (reference.kind === 'sandbox') {
@@ -324,12 +326,78 @@ directory_writer = r'''
         };
     }
 
+    function chExistingAttachmentResult(existingRecord) {
+        const assets = Array.isArray(existingRecord?.assets) ? existingRecord.assets : [];
+        if (assets.length === 0) return null;
+
+        const sandboxPaths = new Map();
+        let sandboxSourceComplete = true;
+
+        const files = assets.map(asset => {
+            if (asset?.kind === 'sandbox') {
+                if (asset.message_id && asset.source_sandbox_path) {
+                    sandboxPaths.set(
+                        `${asset.message_id}|${asset.source_sandbox_path}`,
+                        asset.markdown_path
+                    );
+                } else {
+                    sandboxSourceComplete = false;
+                }
+            }
+
+            return {
+                name: asset.name,
+                path: asset.markdown_path,
+                disk_path: asset.path,
+                kind: asset.kind,
+                isImage: Boolean(asset.is_image),
+                messageId: asset.message_id || null,
+                ownerRole: asset.owner_role || null,
+                size_bytes: asset.size_bytes || 0,
+                source_file_id: asset.source_file_id || null,
+                source_sandbox_path: asset.source_sandbox_path || null
+            };
+        });
+
+        return {
+            detected: existingRecord.attachment_detected ?? assets.length,
+            files,
+            failures: Array.isArray(existingRecord.attachment_failures)
+                ? existingRecord.attachment_failures
+                : [],
+            sandboxPaths,
+            folderName: existingRecord.asset_dir
+                ? String(existingRecord.asset_dir).split('/').pop()
+                : null,
+            reusedExisting: true,
+            sandboxSourceComplete
+        };
+    }
+
+    async function chReadExistingText(rootHandle, relativePath) {
+        const segments = String(relativePath || '')
+            .split('/')
+            .filter(Boolean);
+
+        if (segments.length === 0) throw new Error('existing path missing');
+
+        let dir = rootHandle;
+        for (let i = 0; i < segments.length - 1; i++) {
+            dir = await dir.getDirectoryHandle(segments[i]);
+        }
+
+        const handle = await dir.getFileHandle(segments[segments.length - 1]);
+        const file = await handle.getFile();
+        return await file.text();
+    }
+
     async function chWriteConversationToDirectory({
         rootHandle,
         entry,
         convData,
         workspaceId,
         includeAttachments,
+        existingRecord = null,
         btn,
         conversationIndex,
         conversationTotal
@@ -347,6 +415,13 @@ directory_writer = r'''
         }
 
         let attachmentResult = null;
+        const preserveExistingAssets =
+            !includeAttachments &&
+            existingRecord &&
+            (
+                existingRecord.asset_dir ||
+                (Array.isArray(existingRecord.assets) && existingRecord.assets.length > 0)
+            );
 
         if (includeAttachments) {
             attachmentResult = await chWriteAttachmentsToDirectory(
@@ -365,12 +440,36 @@ directory_writer = r'''
                     });
                 }
             );
+        } else if (preserveExistingAssets) {
+            attachmentResult = chExistingAttachmentResult(existingRecord);
+            chReportProgress(btn, {
+                conversationIndex,
+                conversationTotal,
+                title,
+                phase: '保留已有附件',
+                detail: `${existingRecord.assets?.length || 0} 个已跟踪附件`,
+                fraction: 0.70
+            });
         }
 
         const jsonFilename = generateUniqueFilename(convData);
         const markdownFilename = generateMarkdownFilename(convData);
         const jsonText = JSON.stringify(convData, null, 2);
-        const markdownText = convertConversationToMarkdown(convData, attachmentResult);
+
+        let markdownText;
+        if (
+            preserveExistingAssets &&
+            attachmentResult &&
+            attachmentResult.sandboxSourceComplete === false &&
+            existingRecord?.markdown_path
+        ) {
+            // Gate-3 manifests did not yet store original sandbox paths.
+            // To avoid degrading already-valid local links during this one-time transition,
+            // preserve the existing Markdown rather than rewriting it with unresolved sandbox URLs.
+            markdownText = await chReadExistingText(rootHandle, existingRecord.markdown_path);
+        } else {
+            markdownText = convertConversationToMarkdown(convData, attachmentResult);
+        }
 
         chReportProgress(btn, {
             conversationIndex,
@@ -400,19 +499,28 @@ directory_writer = r'''
         const contentSignature = await chContentSignature(convData);
         const syncedAt = new Date().toISOString();
 
-        const assetDir = attachmentResult?.folderName
-            ? `${relativePrefix}${attachmentResult.folderName}`
-            : null;
+        const assetDir = preserveExistingAssets
+            ? (existingRecord.asset_dir || null)
+            : (
+                attachmentResult?.folderName
+                    ? `${relativePrefix}${attachmentResult.folderName}`
+                    : null
+            );
 
-        const assets = (attachmentResult?.files || []).map(file => ({
-            path: `${relativePrefix}${file.disk_path}`,
-            markdown_path: file.path,
-            name: file.name,
-            kind: file.kind,
-            is_image: Boolean(file.isImage),
-            message_id: file.messageId || null,
-            size_bytes: file.size_bytes
-        }));
+        const assets = preserveExistingAssets
+            ? (Array.isArray(existingRecord.assets) ? existingRecord.assets : [])
+            : (attachmentResult?.files || []).map(file => ({
+                path: `${relativePrefix}${file.disk_path}`,
+                markdown_path: file.path,
+                name: file.name,
+                kind: file.kind,
+                is_image: Boolean(file.isImage),
+                message_id: file.messageId || null,
+                owner_role: file.ownerRole || null,
+                size_bytes: file.size_bytes,
+                source_file_id: file.source_file_id || null,
+                source_sandbox_path: file.source_sandbox_path || null
+            }));
 
         return {
             conversation_id: conversationId,
@@ -430,10 +538,19 @@ directory_writer = r'''
             markdown_bytes: chExpectedByteLength(markdownText),
             asset_dir: assetDir,
             assets,
-            attachment_detected: attachmentResult?.detected || 0,
-            attachment_downloaded: assets.length,
-            attachment_failed: attachmentResult?.failures?.length || 0,
-            attachment_failures: attachmentResult?.failures || [],
+            attachment_detected: preserveExistingAssets
+                ? (existingRecord.attachment_detected ?? assets.length)
+                : (attachmentResult?.detected || 0),
+            attachment_downloaded: preserveExistingAssets
+                ? (existingRecord.attachment_downloaded ?? assets.length)
+                : assets.length,
+            attachment_failed: preserveExistingAssets
+                ? (existingRecord.attachment_failed ?? 0)
+                : (attachmentResult?.failures?.length || 0),
+            attachment_failures: preserveExistingAssets
+                ? (existingRecord.attachment_failures || [])
+                : (attachmentResult?.failures || []),
+            attachments_preserved_without_download: Boolean(preserveExistingAssets),
             synced_at: syncedAt
         };
     }
@@ -484,12 +601,19 @@ directory_writer = r'''
                 try {
                     const convData = await getConversation(entry.id, workspaceId);
 
+                    const resolvedConversationId =
+                        convData?.conversation_id || convData?.id || entry?.id || null;
+                    const existingRecord = resolvedConversationId
+                        ? (manifest.conversations[resolvedConversationId] || null)
+                        : null;
+
                     const record = await chWriteConversationToDirectory({
                         rootHandle,
                         entry,
                         convData,
                         workspaceId,
                         includeAttachments,
+                        existingRecord,
                         btn,
                         conversationIndex: i,
                         conversationTotal: conversationEntries.length
@@ -520,7 +644,7 @@ directory_writer = r'''
                     });
                 } catch (err) {
                     failed++;
-                    console.error('[ChatHarbor Gate 3] Directory/manifest commit failed:', entry?.id, err);
+                    console.error('[ChatHarbor Gate 3.1] Directory/manifest commit failed:', entry?.id, err);
                     chSetProgress(
                         `同步 ${i + 1} / ${conversationEntries.length} · 失败`,
                         `${title} · ${err?.message || err}`,
@@ -541,31 +665,13 @@ directory_writer = r'''
             const manifestCount = Object.keys(manifest.conversations).length;
 
             chSetProgress(
-                failed ? 'Gate 3 完成（存在失败）' : 'Gate 3 完成',
+                failed ? 'Gate 3.1 完成（存在失败）' : 'Gate 3.1 完成',
                 `成功 ${results.length} / ${conversationEntries.length} · manifest 共 ${manifestCount} 条`,
                 100
             );
+            // Non-blocking completion: keep 100% visible immediately.
+            setFabStatus(btn, failed ? '⚠️ Gate 3.1 完成' : '✅ Gate 3.1 完成');
 
-            alert(
-                `ChatHarbor Gate 3 写入完成。
-
-` +
-                `计划：${conversationEntries.length}
-` +
-                `成功：${results.length}
-` +
-                `失败：${failed}
-` +
-                `附件成功：${downloadedAttachments}
-` +
-                `附件失败：${failedAttachments}
-` +
-                `Manifest 记录：${manifestCount}
-
-` +
-                `本阶段已使用 conversation_id 作为身份并逐条提交 manifest；尚未进行版本分类。`
-            );
-            setFabStatus(btn, failed ? '⚠️ Gate 3 完成' : '✅ Gate 3 完成');
 
             return {
                 planned: conversationEntries.length,

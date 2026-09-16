@@ -1,0 +1,26 @@
+{
+  "project": "ChatHarbor",
+  "gate": "Gate 3.1 — Manifest safety + non-blocking completion",
+  "clean_upstream": {
+    "repository": "huhusmang/ChatGPT-Exporter",
+    "commit": "efa1f0f266d15c053af4ab4607b948a06332d9f7",
+    "git_blob_sha1": "3a5dfe6a696e03db7028232d45b136104e67b51f",
+    "upstream_version": "1.5.0",
+    "declared_license": "MIT"
+  },
+  "validated_before_patch": {
+    "gate_2a_directory_writer": "PASS",
+    "gate_2b_attachment_directory": "PASS",
+    "gate_2c_markdown_asset_links": "PASS",
+    "gate_3_identity_idempotence": "PASS",
+    "gate_3_manifest_structure": "PASS"
+  },
+  "gate3_1_changes": [
+    "remove blocking completion alert",
+    "100% remains immediately visible in picker progress area",
+    "unchecked attachments preserve previously tracked asset_dir/assets",
+    "new asset records store source_file_id/source_sandbox_path for future Markdown reuse",
+    "legacy Gate-3 sandbox asset metadata falls back to preserving prior Markdown"
+  ],
+  "next_gate_after_acceptance": "Local Archive Scan + Version-aware Classification"
+}
