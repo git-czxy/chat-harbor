@@ -1,4 +1,4 @@
-# ChatHarbor 0.0.9.0 — Streaming Sync + Workspace Refinement
+# ChatHarbor 0.0.9.1 — Batch Pause Countdown
 
 Date: 2026-09-14
 
@@ -14,13 +14,20 @@ Status: automated regression PASS; real ChatGPT / File System Access smoke test 
 
 The patcher refuses to run if the downloaded upstream file does not match the fixed Git blob.
 
-## What changed in 0.0.9.0
+
+## What changed in 0.0.9.1
+
+- Conservative inter-batch pauses now show a live `MM:SS` remaining countdown, e.g. `剩余 04:46`.
+- The countdown uses the existing absolute wall-clock deadline; it is display feedback only and does not change pacing, random pause duration, pause/resume, cancellation, or sync transaction semantics.
+- No next-batch estimated clock time is shown.
+
+## 0.0.9.0 baseline carried forward
 
 ### 1. Streaming verification + atomic sync
 
 The old integrated flow verified every detail candidate before beginning disk writes.
 
-0.0.9.0 changes the runtime to:
+0.0.9.0 introduced the runtime below; 0.0.9.1 carries it forward unchanged:
 
 ```text
 Read-only Plan
@@ -145,7 +152,7 @@ powershell -ExecutionPolicy Bypass -File .\prepare_clean_integrated_sync.ps1
 Expected output:
 
 ```text
-ChatHarbor-IntegratedSync-0.0.9.0.user.js
+ChatHarbor-IntegratedSync-0.0.9.1.user.js
 ```
 
 Disable older ChatHarbor test versions before enabling this one.
@@ -163,5 +170,5 @@ Verify:
 5. the tri-state Select All acts on the full filtered result;
 6. a small selected sync writes each conversation as it is verified instead of waiting for all detail verification to finish;
 7. pause/resume/cancel still work;
-8. after a system sleep longer than a batch pause, ChatHarbor does not replay the old countdown.
+8. during an inter-batch pause, the displayed remaining time counts down in `MM:SS`; after background/sleep recovery it is recalculated from the wall-clock deadline.
 

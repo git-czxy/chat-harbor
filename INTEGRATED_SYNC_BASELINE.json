@@ -56,7 +56,7 @@
     "local_only_auto_delete": false,
     "untracked_legacy_asset_auto_delete": false
   },
-  "integrated_build_version": "0.0.9.0",
+  "integrated_build_version": "0.0.9.1",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,

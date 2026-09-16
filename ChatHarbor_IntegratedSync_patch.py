@@ -35,7 +35,7 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.9.0\n"
+    "// @version      0.0.9.1\n"
     "// @description  Clean-lineage archive sync with conservative pacing, pause/cancel, and version-aware selective directory sync.\n"
     "// @description:zh-CN 干净来源的本地档案同步：保守节奏、暂停/取消、版本识别与选择性目录同步。\n"
     "// @author       huhu; ChatHarbor contributors\n"
@@ -235,9 +235,17 @@ directory_writer = r'''
         if (chSyncRun.cancelRequested) throw chCancellationError();
     }
 
-    async function chControlledSleep(ms, primary = '保守网络等待', secondary = '') {
+    function chFormatRemainingDuration(ms) {
+        const totalSeconds = Math.max(0, Math.ceil((Number(ms) || 0) / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    async function chControlledSleep(ms, primary = '保守网络等待', secondary = '', options = {}) {
         const duration = Math.max(0, Math.round(Number(ms) || 0));
         const deadline = Date.now() + duration;
+        const countdown = Boolean(options?.countdown);
         chSyncRun.sleepDeadline = deadline;
         chSyncRun.sleepPrimary = primary;
         let systemSuspended = false;
@@ -247,7 +255,10 @@ directory_writer = r'''
                 const remaining = deadline - Date.now();
                 if (remaining <= 0) break;
                 if (remaining >= 1000) {
-                    chSetProgress(primary, secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`, null);
+                    const waitText = countdown
+                        ? `${secondary ? `${secondary} · ` : ''}剩余 ${chFormatRemainingDuration(remaining)}`
+                        : (secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`);
+                    chSetProgress(primary, waitText, null);
                 }
                 const chunk = Math.min(1000, remaining);
                 const before = Date.now();
@@ -1956,7 +1967,8 @@ directory_writer = r'''
                     await chControlledSleep(
                         pauseMs,
                         '保守批次暂停',
-                        `已核验 ${fetchIndex}/${fetchTotal} · 下一批前暂停约 ${Math.round(pauseMs / 1000)} 秒`
+                        `已核验 ${fetchIndex}/${fetchTotal}`,
+                        { countdown: true }
                     );
                 } else {
                     await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已核验 ${fetchIndex}/${fetchTotal}`);
@@ -2379,7 +2391,8 @@ directory_writer = r'''
                         await chControlledSleep(
                             pauseMs,
                             '保守批次暂停',
-                            `已处理 ${fetchIndex}/${fetchTotal} 个远端详情 · 下一批前暂停约 ${Math.round(pauseMs / 1000)} 秒`
+                            `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`,
+                            { countdown: true }
                         );
                     } else {
                         await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`);
@@ -2716,7 +2729,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.9.0 Desktop Workspace + Streaming Sync UI ========================
+# ======================== ChatHarbor 0.0.9.1 Desktop Workspace + Streaming Sync UI ========================
 # The sync/runtime core above remains unchanged. This final bounded patch replaces only the
 # picker presentation, report presentation, and launcher presentation.
 

@@ -188,9 +188,17 @@
         if (chSyncRun.cancelRequested) throw chCancellationError();
     }
 
-    async function chControlledSleep(ms, primary = '保守网络等待', secondary = '') {
+    function chFormatRemainingDuration(ms) {
+        const totalSeconds = Math.max(0, Math.ceil((Number(ms) || 0) / 1000));
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+        return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+
+    async function chControlledSleep(ms, primary = '保守网络等待', secondary = '', options = {}) {
         const duration = Math.max(0, Math.round(Number(ms) || 0));
         const deadline = Date.now() + duration;
+        const countdown = Boolean(options?.countdown);
         chSyncRun.sleepDeadline = deadline;
         chSyncRun.sleepPrimary = primary;
         let systemSuspended = false;
@@ -200,7 +208,10 @@
                 const remaining = deadline - Date.now();
                 if (remaining <= 0) break;
                 if (remaining >= 1000) {
-                    chSetProgress(primary, secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`, null);
+                    const waitText = countdown
+                        ? `${secondary ? `${secondary} · ` : ''}剩余 ${chFormatRemainingDuration(remaining)}`
+                        : (secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`);
+                    chSetProgress(primary, waitText, null);
                 }
                 const chunk = Math.min(1000, remaining);
                 const before = Date.now();
@@ -1909,7 +1920,8 @@
                     await chControlledSleep(
                         pauseMs,
                         '保守批次暂停',
-                        `已核验 ${fetchIndex}/${fetchTotal} · 下一批前暂停约 ${Math.round(pauseMs / 1000)} 秒`
+                        `已核验 ${fetchIndex}/${fetchTotal}`,
+                        { countdown: true }
                     );
                 } else {
                     await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已核验 ${fetchIndex}/${fetchTotal}`);
@@ -2332,7 +2344,8 @@
                         await chControlledSleep(
                             pauseMs,
                             '保守批次暂停',
-                            `已处理 ${fetchIndex}/${fetchTotal} 个远端详情 · 下一批前暂停约 ${Math.round(pauseMs / 1000)} 秒`
+                            `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`,
+                            { countdown: true }
                         );
                     } else {
                         await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`);

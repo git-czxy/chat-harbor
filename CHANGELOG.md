@@ -2,6 +2,17 @@
 
 This changelog records user-visible behavior and important runtime/safety changes. Fine-grained implementation history should remain in Git commits; GitHub Release notes can summarize each stable milestone.
 
+## 0.0.9.1 — 2026-09-14
+
+### Changed
+- Inter-batch conservative pauses now show a live `MM:SS` remaining countdown (for example, `剩余 04:46`) instead of a fixed planned pause duration.
+- Countdown display is derived from the existing absolute wall-clock deadline and refreshes once per second while the batch pause is active.
+- No next-batch estimated clock time is shown.
+
+### Clarified
+- The 0.0.8.0 text `下一批前暂停约 N 秒` was a fixed planned pause duration, not a live countdown. The previous observation alone did not prove a standby timer failure.
+- The wall-clock deadline and wake reconciliation introduced in 0.0.9.0 are retained as robustness hardening, not as a claim that such a failure had been conclusively reproduced.
+
 ## 0.0.9.0 — 2026-09-14
 
 ### Changed
@@ -15,9 +26,9 @@ This changelog records user-visible behavior and important runtime/safety change
 - Choosing an archive directory now automatically performs the read-only local scan and Plan; manual action is `Rescan local`.
 - Added a manual remote `Refresh` action that preserves still-valid selections.
 
-### Fixed
+### Fixed / Hardened
 - Fixed the main list showing project conversations as `No project` before Planner completion.
-- Fixed conservative batch/retry countdowns replaying stale wait time after OS sleep or long browser suspension by using absolute wall-clock deadlines.
+- Hardened conservative batch/retry waiting with absolute wall-clock deadlines so elapsed real time remains authoritative across browser throttling or system sleep.
 - Added wake reconciliation and a normal request-jitter guard before network activity resumes.
 
 ### Safety

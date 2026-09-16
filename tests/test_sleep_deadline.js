@@ -19,6 +19,9 @@ function convertConversationToMarkdown(){return '';}
 const layer=fs.readFileSync(require('path').join(__dirname,'integrated_sync_layer.js'),'utf8');
 eval(layer);
 (async()=>{
+  assert.strictEqual(chFormatRemainingDuration(286000),'04:46');
+  assert.strictEqual(chFormatRemainingDuration(1000),'00:01');
+  assert.strictEqual(chFormatRemainingDuration(0),'00:00');
   const realRandom=Math.random; Math.random=()=>0;
   chBeginControlledRun({speedIndex:3,batchSize:20,batchPauseMinSec:180,batchPauseMaxSec:300,maxRetries:0});
   await chControlledSleep(210000,'保守批次暂停','测试210秒');
@@ -28,6 +31,7 @@ eval(layer);
   assert(sleepCalls<=8,`timer-tick replay detected: ${sleepCalls} sleeps`);
   chEndControlledRun();
   Math.random=realRandom; Date.now=realNow;
+  console.log('PASS MM:SS batch-pause countdown formatter');
   console.log('PASS wall-clock deadline skips elapsed batch pause after system sleep');
   console.log('PASS wake guard jitter applied before next request');
 })().catch(e=>{Date.now=realNow;console.error(e);process.exit(1);});

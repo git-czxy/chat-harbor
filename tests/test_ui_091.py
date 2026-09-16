@@ -73,6 +73,8 @@ for marker in [
     "chReconcileRuntimeState",
     "visibilitychange",
     "wake-guard",
+    "chFormatRemainingDuration",
+    "{ countdown: true }",
     "onItemClassified",
     "onItemCommitted",
     "核验并同步",
@@ -80,7 +82,7 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.9.0' in source
+assert '0.0.9.1' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';" in source
 assert 'background: #10a37f;' in source
 assert 'fabCollapseTimer = setTimeout' in source
@@ -104,3 +106,7 @@ print('PASS auto local scan + rescan UI markers')
 print('PASS streaming verify -> commit runtime markers')
 print('PASS absolute-deadline sleep/wake reconciliation markers')
 print('CORE_SHA256', hashlib.sha256(core.encode()).hexdigest())
+
+assert '下一批前暂停约' not in core
+assert '剩余 ${chFormatRemainingDuration(remaining)}' in core
+print('PASS live MM:SS batch-pause countdown markers')
