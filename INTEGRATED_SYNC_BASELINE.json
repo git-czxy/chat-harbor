@@ -2,7 +2,7 @@
   "product": "ChatHarbor",
   "build": "Incremental Convergence + Manifest-first Local Index + Cached Remote Index + Archive Layout v2",
   "status": "AUTOMATED_REGRESSION_PASS_REAL_UI_AND_LIVE_ENDPOINT_SMOKE_REQUIRED",
-  "date": "2026-09-14",
+  "date": "2026-09-15",
   "clean_upstream": {
     "repository": "huhusmang/ChatGPT-Exporter",
     "commit": "efa1f0f266d15c053af4ab4607b948a06332d9f7",
@@ -93,7 +93,7 @@
     "remote_absence_requires_complete_universe": true,
     "remote_list_checkpoint": "remote_list_* Manifest observation fields"
   },
-  "integrated_build_version": "0.0.11.1",
+  "integrated_build_version": "0.0.11.2",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,
@@ -129,5 +129,5 @@
     "refresh": "normal click = fast newest-window validation; Shift+click = force complete refresh",
     "preflight_status_visibility": "does not auto-switch to pending; first-stage UNCHANGED / NEW / VERIFY remain directly observable"
   },
-  "core_literal_sha256": "4d9af208b6435a71c49a389166552aab86d85ca3f87a011081408ffef5f38740"
+  "core_literal_sha256": "e084df4e11a3fb2bd5a70c16710569665c555d1b8d7bc71eb1523e09af26a810"
 }

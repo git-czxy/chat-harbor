@@ -98,7 +98,8 @@ for marker in [
 ]:
     assert marker in core, f'missing runtime marker: {marker}'
 
-assert '0.0.11.1' in source
+assert '0.0.11.2' in source
+assert '// @version      0.0.11.2' in source
 assert "const FAB_STORAGE_KEY = 'chatharbor-fab-v2';" in source
 assert 'background: #10a37f;' in source
 assert 'fabCollapseTimer = setTimeout' in source

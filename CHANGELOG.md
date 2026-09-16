@@ -1,5 +1,12 @@
 # ChatHarbor Changelog
 
+## 0.0.11.2 — 2026-09-15
+
+- Fixed release metadata: the 0.0.11.1 package accidentally still generated `@version 0.0.11.0`, so Tampermonkey could keep the prior runtime. 0.0.11.2 now has an explicit version bump and build-time assertion.
+- Retains the 0.0.11.1 launcher fixes: `chatharbor-fab-v2`, no duplicate floating percentage/status pill, and right-rail-only runtime progress.
+- Clarified that attachment-enabled transition runs may still have all selected conversations in the actionable queue when legacy attachment completeness is `unknown`; this is real attachment work, not failed Manifest fast-skip.
+- No change to convergence, Remote Index cache, Layout v2, conservative network policy, or clean-lineage upstream.
+
 ## 0.0.11.1 — 2026-09-15
 
 - Fixed stale launcher position persistence by moving ChatHarbor to the `chatharbor-fab-v2` state namespace; default position returns to the right edge.
@@ -7,7 +14,7 @@
 - Runtime sync queue now excludes entries already resolved by Manifest/preflight, while preserving their result counts. Progress numbering reflects actionable detail-fetch candidates only.
 - No change to the incremental convergence, Remote Index cache, conservative network policy, Archive Layout v2, or provider lineage.
 
-## 0.0.11.1 — 2026-09-14
+## 0.0.11.0 — 2026-09-14
 
 ### Fixed — incremental convergence
 - Fixed the repeated-verification loop caused by comparing remote-list metadata against Manifest facts written primarily from the detail endpoint.
