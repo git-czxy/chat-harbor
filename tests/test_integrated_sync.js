@@ -2,6 +2,8 @@ const fs = require('fs');
 const assert = require('assert');
 const { webcrypto } = require('crypto');
 global.crypto = webcrypto;
+global.document={getElementById:()=>null};
+global.localStorage={getItem:()=>null,setItem:()=>{}};
 const CH_SIGNATURE_VERSION = 'sha256-current_node+mapping-v1';
 
 function normalizeEpochSeconds(value) {
@@ -35,6 +37,7 @@ async function chReadManifest(){throw new Error('not used');}
 
 const layer=fs.readFileSync('/mnt/data/chatharbor_stage4/integrated_sync_layer.js','utf8');
 eval(layer);
+chContentSignature = async (c)=> c.__sig || 'sig';
 
 (async()=>{
   // Remote-universe merge must collapse discovery duplicates by canonical ID.

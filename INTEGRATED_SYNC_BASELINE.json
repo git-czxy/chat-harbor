@@ -34,10 +34,14 @@
     "LOCAL_UNTRACKED conservative adoption",
     "selective sync using the existing picker checkboxes",
     "full sync when no checkbox is selected",
-    "write -> verify -> manifest commit -> tracked-only cleanup ordering"
+    "write -> verify -> manifest commit -> tracked-only cleanup ordering",
+    "conservative network policy with six speed levels",
+    "20-item default detail-fetch batching with randomized inter-batch pause",
+    "retry policy for retryable detail-fetch errors",
+    "cooperative pause / resume / safe cancellation controls",
+    "active-run navigation guard"
   ],
   "explicitly_not_in_this_stage": [
-    "multi-level conservative network-policy migration",
     "final zh-CN/en-US resource refactor",
     "removal of upstream ZIP compatibility UI/code",
     "ZIP snapshot feature"
@@ -48,6 +52,15 @@
     "local_only_auto_delete": false,
     "untracked_legacy_asset_auto_delete": false
   },
-  "integrated_build_version": "0.0.6.1",
-  "hotfix": "entry-visibility"
+  "integrated_build_version": "0.0.7.0",
+  "runtime_control": {
+    "default_speed": "6000ms base + 0-4000ms jitter",
+    "default_batch_size": 20,
+    "default_batch_pause_seconds": [
+      180,
+      300
+    ],
+    "pause_semantics": "finish in-flight request, then no new detail request or conversation transaction",
+    "cancel_semantics": "stop at safe boundary; completed per-conversation commits remain authoritative"
+  }
 }

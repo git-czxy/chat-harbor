@@ -35,9 +35,9 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.6.1\n"
-    "// @description  Clean-lineage local archive scan, version-aware classification and selective directory sync.\n"
-    "// @description:zh-CN 干净来源的本地档案扫描、版本识别分类与选择性目录同步。\n"
+    "// @version      0.0.7.0\n"
+    "// @description  Clean-lineage archive sync with conservative pacing, pause/cancel, and version-aware selective directory sync.\n"
+    "// @description:zh-CN 干净来源的本地档案同步：保守节奏、暂停/取消、版本识别与选择性目录同步。\n"
     "// @author       huhu; ChatHarbor contributors\n"
 )
 
@@ -64,6 +64,241 @@ directory_writer = r'''
     const CH_MANIFEST_NAME = 'ChatHarbor_manifest.json';
     const CH_MANIFEST_SCHEMA_VERSION = 1;
     const CH_SIGNATURE_VERSION = 'sha256-current_node+mapping-v1';
+
+
+    // ======================== ChatHarbor Conservative Network Policy ========================
+    // Clean reimplementation of the historical ChatHarbor conservative behavior contract.
+    const CH_NETWORK_POLICY_KEY = 'chatharbor_network_policy_v1';
+    const CH_SPEED_LEVELS = [
+        { name: '1. 最快（上游）', base: 600, jitter: 400 },
+        { name: '2. 较快', base: 1500, jitter: 1000 },
+        { name: '3. 中等', base: 3000, jitter: 2000 },
+        { name: '4. 较慢（推荐）', base: 6000, jitter: 4000 },
+        { name: '5. 很慢', base: 9000, jitter: 6000 },
+        { name: '6. 最慢', base: 12000, jitter: 8000 }
+    ];
+    const CH_DEFAULT_NETWORK_POLICY = Object.freeze({
+        speedIndex: 3,
+        batchSize: 20,
+        batchPauseMinSec: 180,
+        batchPauseMaxSec: 300,
+        maxRetries: 2
+    });
+
+    function chNormalizeNetworkPolicy(value = {}) {
+        const rawSpeed = Number(value.speedIndex);
+        const speedIndex = Number.isFinite(rawSpeed)
+            ? Math.max(0, Math.min(CH_SPEED_LEVELS.length - 1, Math.trunc(rawSpeed)))
+            : CH_DEFAULT_NETWORK_POLICY.speedIndex;
+        const rawBatch = Number(value.batchSize);
+        const batchSize = Number.isFinite(rawBatch)
+            ? Math.max(1, Math.min(200, Math.trunc(rawBatch)))
+            : CH_DEFAULT_NETWORK_POLICY.batchSize;
+        const rawMin = Number(value.batchPauseMinSec);
+        const rawMax = Number(value.batchPauseMaxSec);
+        const minSec = Number.isFinite(rawMin)
+            ? Math.max(0, Math.min(3600, Math.trunc(rawMin)))
+            : CH_DEFAULT_NETWORK_POLICY.batchPauseMinSec;
+        const maxCandidate = Number.isFinite(rawMax)
+            ? Math.max(0, Math.min(3600, Math.trunc(rawMax)))
+            : CH_DEFAULT_NETWORK_POLICY.batchPauseMaxSec;
+        const rawRetries = Number(value.maxRetries);
+        const maxRetries = Number.isFinite(rawRetries)
+            ? Math.max(0, Math.min(5, Math.trunc(rawRetries)))
+            : CH_DEFAULT_NETWORK_POLICY.maxRetries;
+        return {
+            speedIndex,
+            batchSize,
+            batchPauseMinSec: minSec,
+            batchPauseMaxSec: Math.max(minSec, maxCandidate),
+            maxRetries
+        };
+    }
+
+    function chLoadNetworkPolicy() {
+        try {
+            const raw = localStorage.getItem(CH_NETWORK_POLICY_KEY);
+            return chNormalizeNetworkPolicy(raw ? JSON.parse(raw) : CH_DEFAULT_NETWORK_POLICY);
+        } catch (_) {
+            return { ...CH_DEFAULT_NETWORK_POLICY };
+        }
+    }
+
+    function chSaveNetworkPolicy(policy) {
+        const normalized = chNormalizeNetworkPolicy(policy);
+        try { localStorage.setItem(CH_NETWORK_POLICY_KEY, JSON.stringify(normalized)); } catch (_) {}
+        return normalized;
+    }
+
+    function chNetworkDelayMs(policy) {
+        const p = chNormalizeNetworkPolicy(policy);
+        const speed = CH_SPEED_LEVELS[p.speedIndex];
+        return speed.base + Math.random() * speed.jitter;
+    }
+
+    function chNetworkBatchPauseMs(policy) {
+        const p = chNormalizeNetworkPolicy(policy);
+        const span = p.batchPauseMaxSec - p.batchPauseMinSec;
+        return Math.round((p.batchPauseMinSec + Math.random() * span) * 1000);
+    }
+
+    function chNetworkPolicySummary(policy) {
+        const p = chNormalizeNetworkPolicy(policy);
+        return `${CH_SPEED_LEVELS[p.speedIndex].name} · 每批 ${p.batchSize} · 批间 ${p.batchPauseMinSec}-${p.batchPauseMaxSec} 秒`;
+    }
+
+    const chSyncRun = {
+        active: false,
+        paused: false,
+        cancelRequested: false,
+        cancelReason: null,
+        phase: 'idle',
+        policy: chLoadNetworkPolicy(),
+        waiters: []
+    };
+
+    function chBeginControlledRun(policy = null) {
+        if (chSyncRun.active) throw new Error('已有目录同步任务正在运行。');
+        chSyncRun.active = true;
+        chSyncRun.paused = false;
+        chSyncRun.cancelRequested = false;
+        chSyncRun.cancelReason = null;
+        chSyncRun.phase = 'starting';
+        chSyncRun.policy = chSaveNetworkPolicy(policy || chLoadNetworkPolicy());
+        chSyncRun.waiters = [];
+        chUpdateRunControlUi();
+        return chSyncRun;
+    }
+
+    function chEndControlledRun() {
+        const waiters = chSyncRun.waiters.splice(0);
+        waiters.forEach(resolve => { try { resolve(); } catch (_) {} });
+        chSyncRun.active = false;
+        chSyncRun.paused = false;
+        chSyncRun.cancelRequested = false;
+        chSyncRun.cancelReason = null;
+        chSyncRun.phase = 'idle';
+        chUpdateRunControlUi();
+    }
+
+    function chRequestPause() {
+        if (!chSyncRun.active || chSyncRun.cancelRequested) return false;
+        chSyncRun.paused = true;
+        chUpdateRunControlUi();
+        return true;
+    }
+
+    function chResumeRun() {
+        if (!chSyncRun.active) return false;
+        chSyncRun.paused = false;
+        const waiters = chSyncRun.waiters.splice(0);
+        waiters.forEach(resolve => { try { resolve(); } catch (_) {} });
+        chUpdateRunControlUi();
+        return true;
+    }
+
+    function chRequestCancel(reason = 'USER_CANCELLED') {
+        if (!chSyncRun.active) return false;
+        chSyncRun.cancelRequested = true;
+        chSyncRun.cancelReason = reason;
+        chSyncRun.paused = false;
+        const waiters = chSyncRun.waiters.splice(0);
+        waiters.forEach(resolve => { try { resolve(); } catch (_) {} });
+        chUpdateRunControlUi();
+        return true;
+    }
+
+    function chCancellationError(message = '目录同步已取消。') {
+        const err = new Error(message);
+        err.name = 'ChatHarborCancelled';
+        err.code = 'CHATHARBOR_CANCELLED';
+        return err;
+    }
+
+    function chIsCancellation(err) {
+        return err?.code === 'CHATHARBOR_CANCELLED' || err?.name === 'ChatHarborCancelled';
+    }
+
+    async function chControlCheckpoint(phase = null) {
+        if (phase) chSyncRun.phase = phase;
+        if (chSyncRun.cancelRequested) throw chCancellationError();
+        while (chSyncRun.paused && !chSyncRun.cancelRequested) {
+            chSetProgress('已暂停', '点击“继续”恢复；暂停期间不会发起新的详情请求或开始新的会话写入。', null);
+            await new Promise(resolve => chSyncRun.waiters.push(resolve));
+        }
+        if (chSyncRun.cancelRequested) throw chCancellationError();
+    }
+
+    async function chControlledSleep(ms, primary = '保守网络等待', secondary = '') {
+        let remaining = Math.max(0, Math.round(Number(ms) || 0));
+        while (remaining > 0) {
+            await chControlCheckpoint();
+            const chunk = Math.min(1000, remaining);
+            if (remaining >= 1000) {
+                chSetProgress(primary, secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`, null);
+            }
+            await sleep(chunk);
+            remaining -= chunk;
+        }
+        await chControlCheckpoint();
+    }
+
+    function chErrorStatus(err) {
+        if (Number.isFinite(err?.status)) return Number(err.status);
+        const match = String(err?.message || '').match(/\((\d{3})\)|HTTP\s+(\d{3})|\b(429|5\d\d|401|403)\b/i);
+        return match ? Number(match[1] || match[2] || match[3]) : null;
+    }
+
+    function chRetryDelayMs(err, attempt) {
+        const status = chErrorStatus(err);
+        if (status === 429) return 120000 * Math.max(1, attempt);
+        if (status && status >= 500) return 30000 * Math.max(1, attempt);
+        if (status === 401 || status === 403) return null;
+        return 30000 * Math.max(1, attempt);
+    }
+
+    async function chGetConversationConservative(id, workspaceId = null) {
+        const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
+        const maxAttempts = 1 + policy.maxRetries;
+        let lastError = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            await chControlCheckpoint('detail-fetch');
+            try {
+                return await getConversation(id, workspaceId);
+            } catch (err) {
+                if (chIsCancellation(err)) throw err;
+                lastError = err;
+                const delay = chRetryDelayMs(err, attempt);
+                if (attempt >= maxAttempts || delay == null) break;
+                await chControlledSleep(
+                    delay,
+                    '网络异常，保守重试等待',
+                    `${id} · 第 ${attempt}/${policy.maxRetries} 次重试前等待 ${Math.round(delay / 1000)} 秒`
+                );
+            }
+        }
+        throw lastError || new Error(`获取对话详情失败: ${id}`);
+    }
+
+    function chUpdateRunControlUi() {
+        const pauseBtn = document.getElementById('ch-pause-sync-btn');
+        const cancelBtn = document.getElementById('ch-cancel-sync-btn');
+        const backBtn = document.getElementById('back-btn');
+        if (pauseBtn) {
+            pauseBtn.style.display = chSyncRun.active ? '' : 'none';
+            pauseBtn.disabled = !chSyncRun.active || chSyncRun.cancelRequested;
+            pauseBtn.textContent = chSyncRun.paused ? '继续' : '暂停';
+        }
+        if (cancelBtn) {
+            cancelBtn.style.display = chSyncRun.active ? '' : 'none';
+            cancelBtn.disabled = !chSyncRun.active || chSyncRun.cancelRequested;
+            cancelBtn.textContent = chSyncRun.cancelRequested ? '正在取消…' : '取消同步';
+        }
+        if (backBtn) {
+            backBtn.disabled = chSyncRun.active;
+            backBtn.title = chSyncRun.active ? '同步运行期间请先暂停/取消；“返回”不会被当作停止操作。' : '';
+        }
+    }
 
     function chExpectedByteLength(data) {
         if (typeof data === 'string') return new TextEncoder().encode(data).byteLength;
@@ -1652,9 +1887,11 @@ directory_writer = r'''
                 fetchTotal ? Math.round((fetchIndex / fetchTotal) * 45) : 45
             );
             try {
-                const convData = await getConversation(item.id, workspaceId);
+                await chControlCheckpoint('detail-verification');
+                const convData = await chGetConversationConservative(item.id, workspaceId);
                 resultItems.push(await chClassifyFetchedConversation(item, convData));
             } catch (err) {
+                if (chIsCancellation(err)) throw err;
                 resultItems.push({
                     ...item,
                     finalAction: 'ERROR',
@@ -1664,7 +1901,19 @@ directory_writer = r'''
                 });
             }
             fetchIndex++;
-            if (fetchIndex < fetchTotal) await sleep(jitter());
+            if (fetchIndex < fetchTotal) {
+                const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
+                if (fetchIndex % policy.batchSize === 0) {
+                    const pauseMs = chNetworkBatchPauseMs(policy);
+                    await chControlledSleep(
+                        pauseMs,
+                        '保守批次暂停',
+                        `已核验 ${fetchIndex}/${fetchTotal} · 下一批前暂停约 ${Math.round(pauseMs / 1000)} 秒`
+                    );
+                } else {
+                    await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已核验 ${fetchIndex}/${fetchTotal}`);
+                }
+            }
         }
 
         const counts = {};
@@ -1884,6 +2133,7 @@ directory_writer = r'''
             `Manifest-only commits: ${result.sync.manifestOnly}`,
             `File+manifest commits: ${result.sync.fileCommits}`,
             `Cleanup warnings: ${result.sync.cleanupWarnings.length}`,
+            `Cancelled: ${result.sync.cancelled ? 'YES' : 'NO'}`,
             '',
             'LOCAL_ONLY was never deleted.',
             'Cleanup only touched paths explicitly tracked by the prior manifest.'
@@ -1951,14 +2201,19 @@ directory_writer = r'''
         workspaceId = null,
         includeAttachments = false,
         remoteUniverseComplete = true,
-        remoteUniverseNote = null
+        remoteUniverseNote = null,
+        networkPolicy = null
     }) {
         const selected = selectedIds instanceof Set && selectedIds.size > 0 ? selectedIds : null;
         if (!selected && !remoteUniverseComplete) {
             throw new Error('全范围同步要求完整远端列表；当前 Remote universe 不完整，已停止写入。');
         }
+        const ownsRun = !chSyncRun.active;
+        if (ownsRun) chBeginControlledRun(networkPolicy || chLoadNetworkPolicy());
+        else if (networkPolicy) chSyncRun.policy = chSaveNetworkPolicy(networkPolicy);
 
-        chSetProgress('目录同步', '扫描本地档案…', 0);
+        chSetProgress('目录同步', `扫描本地档案… · ${chNetworkPolicySummary(chSyncRun.policy)}`, 0);
+        await chControlCheckpoint('local-scan');
         const localScan = await chScanLocalArchiveReadOnly(rootHandle);
         if (localScan.manifestExists && !localScan.manifestReadable) {
             throw new Error(`${CH_MANIFEST_NAME} 不可读或不兼容，已停止同步以避免覆盖。`);
@@ -1969,7 +2224,21 @@ directory_writer = r'''
         });
 
         chSetProgress('目录同步', `预检完成 · 最多抓取 ${plan.summary.maximumFetchRequired} 条详情`, 5);
-        const verification = await chVerifyPreflightCandidates({ plan, workspaceId });
+        let verification;
+        try {
+            verification = await chVerifyPreflightCandidates({ plan, workspaceId });
+        } catch (err) {
+            if (chIsCancellation(err)) {
+                chSetProgress('目录同步已取消', '已停止后续详情请求；尚未进入写入阶段。', 100);
+                return {
+                    localScan,
+                    plan,
+                    verification: { items: [], counts: {}, detailFetchCount: 0, cancelled: true },
+                    sync: { attempted: 0, succeeded: 0, failed: 0, manifestOnly: 0, fileCommits: 0, cleanupWarnings: [], results: [], failures: [], cancelled: true }
+                };
+            }
+            throw err;
+        }
 
         const actionable = verification.items.filter(item => CH_FINAL_SYNC_ACTIONS.has(item.finalAction));
         const manifest = await chReadManifest(rootHandle);
@@ -1982,10 +2251,20 @@ directory_writer = r'''
             fileCommits: 0,
             cleanupWarnings: [],
             results: [],
-            failures: []
+            failures: [],
+            cancelled: false
         };
 
         for (let i = 0; i < actionable.length; i++) {
+            try {
+                await chControlCheckpoint('apply-sync');
+            } catch (err) {
+                if (chIsCancellation(err)) {
+                    sync.cancelled = true;
+                    break;
+                }
+                throw err;
+            }
             const item = actionable[i];
             const title = item.convData?.title || item.remote?.title || item.id;
             chSetProgress(
@@ -2009,7 +2288,25 @@ directory_writer = r'''
                 if (applied.mode === 'FILES_AND_MANIFEST') sync.fileCommits++;
                 sync.cleanupWarnings.push(...(applied.cleanup?.warnings || []).map(w => `${item.id}: ${w}`));
                 sync.results.push(applied);
+                if (includeAttachments && applied?.record?.attachment_detected > 0 && i < actionable.length - 1) {
+                    const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
+                    const completed = i + 1;
+                    if (completed % policy.batchSize === 0) {
+                        const pauseMs = chNetworkBatchPauseMs(policy);
+                        await chControlledSleep(
+                            pauseMs,
+                            '附件同步批次暂停',
+                            `已完成 ${completed}/${actionable.length} 个会话 · 暂停约 ${Math.round(pauseMs / 1000)} 秒`
+                        );
+                    } else {
+                        await chControlledSleep(chNetworkDelayMs(policy), '附件同步请求间隔', `${completed}/${actionable.length}`);
+                    }
+                }
             } catch (err) {
+                if (chIsCancellation(err)) {
+                    sync.cancelled = true;
+                    break;
+                }
                 sync.failed++;
                 sync.failures.push({
                     id: item.id,
@@ -2020,8 +2317,10 @@ directory_writer = r'''
         }
 
         chSetProgress(
-            sync.failed ? '目录同步完成（存在失败）' : '目录同步完成',
-            `成功 ${sync.succeeded}/${sync.attempted} · 未变化 ${verification.counts.UNCHANGED || 0} · 异常 ${(verification.counts.ERROR || 0) + (verification.counts.DUPLICATE || 0)}`,
+            sync.cancelled ? '目录同步已取消' : (sync.failed ? '目录同步完成（存在失败）' : '目录同步完成'),
+            sync.cancelled
+                ? `已安全提交 ${sync.succeeded} 个会话；未开始的会话保持不变，下次可继续。`
+                : `成功 ${sync.succeeded}/${sync.attempted} · 未变化 ${verification.counts.UNCHANGED || 0} · 异常 ${(verification.counts.ERROR || 0) + (verification.counts.DUPLICATE || 0)}`,
             100
         );
 
@@ -2111,8 +2410,10 @@ sync_handler = r'''            syncDirBtn.onclick = async () => {
                 syncDirBtn.disabled = true;
                 exportBtn.disabled = true;
                 try {
-                    chSetProgress('目录同步', '补全远端列表范围…', 0);
+                    chBeginControlledRun(state.networkPolicy);
+                    chSetProgress('目录同步', `补全远端列表范围… · ${chNetworkPolicySummary(chSyncRun.policy)}`, 0);
                     const remoteUniverse = await chCollectPreflightRemoteUniverse(mode, workspaceId, state.list);
+                    await chControlCheckpoint('remote-universe-ready');
                     await chRunIntegratedDirectorySync({
                         rootHandle,
                         remoteList: remoteUniverse.remoteList,
@@ -2120,21 +2421,142 @@ sync_handler = r'''            syncDirBtn.onclick = async () => {
                         workspaceId,
                         includeAttachments: state.includeAttachments,
                         remoteUniverseComplete: remoteUniverse.complete,
-                        remoteUniverseNote: remoteUniverse.note
+                        remoteUniverseNote: remoteUniverse.note,
+                        networkPolicy: state.networkPolicy
                     });
                 } catch (err) {
-                    console.error('[ChatHarbor Integrated Sync] failed:', err);
-                    chSetProgress('目录同步失败', err?.message || String(err), 100);
+                    if (chIsCancellation(err)) {
+                        chSetProgress('目录同步已取消', '已在安全边界停止；已提交会话保留，下次同步可继续。', 100);
+                    } else {
+                        console.error('[ChatHarbor Integrated Sync] failed:', err);
+                        chSetProgress('目录同步失败', err?.message || String(err), 100);
+                    }
                 } finally {
+                    chEndControlledRun();
                     preflightBtn.disabled = state.loading;
                     syncDirBtn.disabled = state.loading;
                     exportBtn.disabled = state.loading || state.selected.size === 0;
+                    renderList();
                 }
             };
 
 '''
 
-text = text.replace(handler_anchor, preflight_handler + sync_handler + handler_anchor, 1)
+
+# Run controls are bound in the existing picker; no second execution dialog is introduced.
+control_binding = r'''            const pauseSyncBtn = dialog.querySelector('#ch-pause-sync-btn');
+            const cancelSyncBtn = dialog.querySelector('#ch-cancel-sync-btn');
+            if (pauseSyncBtn) pauseSyncBtn.onclick = () => {
+                if (!chSyncRun.active) return;
+                if (chSyncRun.paused) chResumeRun();
+                else chRequestPause();
+            };
+            if (cancelSyncBtn) cancelSyncBtn.onclick = () => {
+                if (!chSyncRun.active) return;
+                chRequestCancel('USER_CANCELLED');
+                chSetProgress('正在取消同步', '不会开始新的详情请求或新的会话事务；若当前会话正在提交，将先完成该原子事务。', null);
+            };
+            chUpdateRunControlUi();
+
+'''
+text = text.replace(handler_anchor, control_binding + preflight_handler + sync_handler + handler_anchor, 1)
+
+
+# Add conservative policy state to the existing picker state object.
+state_anchor = "            includeAttachments: Boolean(includeAttachments)\n        };"
+state_replacement = "            includeAttachments: Boolean(includeAttachments),\n            networkPolicy: chLoadNetworkPolicy()\n        };"
+if state_anchor not in text:
+    raise SystemExit("Picker state anchor not found")
+text = text.replace(state_anchor, state_replacement, 1)
+
+# Compact network-policy controls under the existing attachment toggle.
+attachment_panel_anchor = '''                </label>
+                <div id="conv-status" style="margin-bottom: 8px; font-size: 12px; color: #666;">正在加载列表...</div>'''
+attachment_panel_replacement = '''                </label>
+                <details id="ch-network-policy-panel" style="margin-bottom:10px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px; background:#fff;">
+                    <summary id="ch-network-policy-summary" style="cursor:pointer; font-size:12px; font-weight:600;">网络策略：${chNetworkPolicySummary(state.networkPolicy)}</summary>
+                    <div style="display:grid; grid-template-columns:1.6fr .7fr .8fr .8fr; gap:8px; margin-top:8px; align-items:end;">
+                        <label style="font-size:11px; color:#666;">速度
+                            <select id="ch-speed-level" style="width:100%; margin-top:3px; padding:6px; border:1px solid #ccc; border-radius:6px;">${CH_SPEED_LEVELS.map((x,i)=>`<option value="${i}" ${i===state.networkPolicy.speedIndex?'selected':''}>${x.name}</option>`).join('')}</select>
+                        </label>
+                        <label style="font-size:11px; color:#666;">每批
+                            <input id="ch-batch-size" type="number" min="1" max="200" value="${state.networkPolicy.batchSize}" style="width:100%; box-sizing:border-box; margin-top:3px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                        </label>
+                        <label style="font-size:11px; color:#666;">暂停最小(秒)
+                            <input id="ch-pause-min" type="number" min="0" max="3600" value="${state.networkPolicy.batchPauseMinSec}" style="width:100%; box-sizing:border-box; margin-top:3px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                        </label>
+                        <label style="font-size:11px; color:#666;">暂停最大(秒)
+                            <input id="ch-pause-max" type="number" min="0" max="3600" value="${state.networkPolicy.batchPauseMaxSec}" style="width:100%; box-sizing:border-box; margin-top:3px; padding:6px; border:1px solid #ccc; border-radius:6px;">
+                        </label>
+                    </div>
+                    <div style="margin-top:6px; font-size:11px; color:#777;">默认沿用超保守策略：较慢 6–10 秒/会话详情；20 条/批；批间随机 3–5 分钟。设置只影响后续新任务。</div>
+                </details>
+                <div id="conv-status" style="margin-bottom: 8px; font-size: 12px; color: #666;">正在加载列表...</div>'''
+if attachment_panel_anchor not in text:
+    raise SystemExit("Network policy UI anchor not found")
+text = text.replace(attachment_panel_anchor, attachment_panel_replacement, 1)
+
+policy_query_anchor = "            const includeAttachmentsInput = dialog.querySelector('#include-attachments-picker');\n"
+policy_query_replacement = policy_query_anchor + (
+    "            const speedLevelInput = dialog.querySelector('#ch-speed-level');\n"
+    "            const batchSizeInput = dialog.querySelector('#ch-batch-size');\n"
+    "            const pauseMinInput = dialog.querySelector('#ch-pause-min');\n"
+    "            const pauseMaxInput = dialog.querySelector('#ch-pause-max');\n"
+    "            const networkSummary = dialog.querySelector('#ch-network-policy-summary');\n"
+)
+if policy_query_anchor not in text:
+    raise SystemExit("Network policy query anchor not found")
+text = text.replace(policy_query_anchor, policy_query_replacement, 1)
+
+policy_handler_anchor = '''            includeAttachmentsInput.onchange = (e) => {
+                state.includeAttachments = e.target.checked;
+            };
+'''
+policy_handler_replacement = policy_handler_anchor + '''            const persistPolicyFromUi = () => {
+                state.networkPolicy = chSaveNetworkPolicy({
+                    ...state.networkPolicy,
+                    speedIndex: Number(speedLevelInput?.value),
+                    batchSize: Number(batchSizeInput?.value),
+                    batchPauseMinSec: Number(pauseMinInput?.value),
+                    batchPauseMaxSec: Number(pauseMaxInput?.value)
+                });
+                if (batchSizeInput) batchSizeInput.value = String(state.networkPolicy.batchSize);
+                if (pauseMinInput) pauseMinInput.value = String(state.networkPolicy.batchPauseMinSec);
+                if (pauseMaxInput) pauseMaxInput.value = String(state.networkPolicy.batchPauseMaxSec);
+                if (networkSummary) networkSummary.textContent = `网络策略：${chNetworkPolicySummary(state.networkPolicy)}`;
+            };
+            if (speedLevelInput) speedLevelInput.onchange = persistPolicyFromUi;
+            if (batchSizeInput) batchSizeInput.onchange = persistPolicyFromUi;
+            if (pauseMinInput) pauseMinInput.onchange = persistPolicyFromUi;
+            if (pauseMaxInput) pauseMaxInput.onchange = persistPolicyFromUi;
+'''
+if policy_handler_anchor not in text:
+    raise SystemExit("Network policy handler anchor not found")
+text = text.replace(policy_handler_anchor, policy_handler_replacement, 1)
+
+back_handler_anchor = '''            backBtn.onclick = () => {
+                closeDialog();
+                showExportDialog({ includeAttachments: state.includeAttachments });
+            };
+'''
+back_handler_replacement = '''            backBtn.onclick = () => {
+                if (chSyncRun.active) {
+                    chSetProgress('同步仍在运行', '请使用“暂停”或“取消同步”。返回只负责导航，不再隐式隐藏后台任务。', null);
+                    return;
+                }
+                closeDialog();
+                showExportDialog({ includeAttachments: state.includeAttachments });
+            };
+'''
+if back_handler_anchor not in text:
+    raise SystemExit("Back handler anchor not found")
+text = text.replace(back_handler_anchor, back_handler_replacement, 1)
+
+picker_overlay_anchor = "        overlay.onclick = (e) => { if (e.target === overlay) closeDialog(); };\n\n        const listPromise = mode === 'project'\n"
+picker_overlay_replacement = "        overlay.onclick = (e) => {\n            if (e.target !== overlay) return;\n            if (chSyncRun.active) {\n                chSetProgress('同步仍在运行', '请使用“暂停”或“取消同步”；运行期间不会通过点击背景退出。', null);\n                return;\n            }\n            closeDialog();\n        };\n\n        const listPromise = mode === 'project'\n"
+if picker_overlay_anchor not in text:
+    raise SystemExit("Picker overlay anchor not found")
+text = text.replace(picker_overlay_anchor, picker_overlay_replacement, 1)
 
 # ChatHarbor UI hotfix 0.0.6.1:
 # Upstream v1.5 auto-collapses the right-edge launcher after 2.5 seconds. For ChatHarbor,
@@ -2176,6 +2598,12 @@ if render_query_anchor not in text:
     raise SystemExit("renderList query anchor not found")
 text = text.replace(render_query_anchor, render_query_repl, 1)
 
+controls_anchor = "            const controlsDisabled = state.loading;\n"
+controls_replacement = "            const controlsDisabled = state.loading || chSyncRun.active;\n"
+if controls_anchor not in text:
+    raise SystemExit("controlsDisabled anchor not found")
+text = text.replace(controls_anchor, controls_replacement, 1)
+
 disabled_anchor = '''            if (clearAllBtn) clearAllBtn.disabled = controlsDisabled;
             if (exportBtn) exportBtn.disabled = controlsDisabled || state.selected.size === 0;'''
 disabled_repl = '''            if (clearAllBtn) clearAllBtn.disabled = controlsDisabled;
@@ -2198,7 +2626,7 @@ text = text.replace(
 
 
 progress_anchor = '                <div id="conv-status" style="margin-bottom: 8px; font-size: 12px; color: #666;">正在加载列表...</div>\n                <div id="conv-list" style="max-height: 360px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background: #fff;"></div>'
-progress_replacement = '                <div id="conv-status" style="margin-bottom: 8px; font-size: 12px; color: #666;">正在加载列表...</div>\n                <div id="ch-sync-progress" style="display:none; margin-bottom: 10px; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #f9fafb;">\n                    <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; font-size:12px;">\n                        <strong id="ch-sync-progress-primary" style="font-size:12px;">准备同步</strong>\n                        <span id="ch-sync-progress-pct" style="color:#666; min-width:36px; text-align:right;"></span>\n                    </div>\n                    <div style="height:6px; margin-top:7px; background:#e5e7eb; border-radius:999px; overflow:hidden;">\n                        <div id="ch-sync-progress-bar" style="width:0%; height:100%; background:#10a37f; border-radius:999px; transition:width .18s ease;"></div>\n                    </div>\n                    <div id="ch-sync-progress-secondary" style="margin-top:6px; font-size:11px; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>\n                </div>\n                <div id="conv-list" style="max-height: 360px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background: #fff;"></div>'
+progress_replacement = '                <div id="conv-status" style="margin-bottom: 8px; font-size: 12px; color: #666;">正在加载列表...</div>\n                <div id="ch-sync-progress" style="display:none; margin-bottom: 10px; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #f9fafb;">\n                    <div style="display:flex; justify-content:space-between; gap:12px; align-items:center; font-size:12px;">\n                        <strong id="ch-sync-progress-primary" style="font-size:12px;">准备同步</strong>\n                        <span id="ch-sync-progress-pct" style="color:#666; min-width:36px; text-align:right;"></span>\n                    </div>\n                    <div style="height:6px; margin-top:7px; background:#e5e7eb; border-radius:999px; overflow:hidden;">\n                        <div id="ch-sync-progress-bar" style="width:0%; height:100%; background:#10a37f; border-radius:999px; transition:width .18s ease;"></div>\n                    </div>\n                    <div id="ch-sync-progress-secondary" style="margin-top:6px; font-size:11px; color:#666; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></div>\n                    <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:8px;">\n                        <button id="ch-pause-sync-btn" style="display:none; padding:5px 10px; border:1px solid #6366f1; border-radius:6px; background:#fff; color:#4338ca; cursor:pointer;">暂停</button>\n                        <button id="ch-cancel-sync-btn" style="display:none; padding:5px 10px; border:1px solid #dc2626; border-radius:6px; background:#fff; color:#b91c1c; cursor:pointer;">取消同步</button>\n                    </div>\n                </div>\n                <div id="conv-list" style="max-height: 360px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; background: #fff;"></div>'
 if progress_anchor not in text:
     raise SystemExit("Progress UI anchor not found")
 text = text.replace(progress_anchor, progress_replacement, 1)
@@ -2217,6 +2645,11 @@ required_runtime_markers = [
     "选择对话 / 目录同步",
     "id=\"preflight-plan-btn\"",
     "id=\"sync-directory-btn\"",
+    "id=\"ch-pause-sync-btn\"",
+    "id=\"ch-cancel-sync-btn\"",
+    "CH_SPEED_LEVELS",
+    "chBeginControlledRun",
+    "chGetConversationConservative",
 ]
 missing_runtime_markers = [marker for marker in required_runtime_markers if marker not in text]
 if missing_runtime_markers:

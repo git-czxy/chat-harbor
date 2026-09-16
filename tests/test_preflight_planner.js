@@ -17,7 +17,9 @@ let mockProjectList = [];
 let mockRootList = [];
 async function listProjectSpaceConversations(){ return mockProjectList; }
 async function listConversations(){ return mockRootList; }
-const snippet = fs.readFileSync('/mnt/data/chatharbor_stage4/preflight_snippet.js','utf8');
+global.document={getElementById:()=>null};
+global.localStorage={getItem:()=>null,setItem:()=>{}};
+const snippet = fs.readFileSync('/mnt/data/chatharbor_stage4/integrated_sync_layer.js','utf8');
 eval(snippet);
 
 function rec(id,title,t,tracking='manifest') {
