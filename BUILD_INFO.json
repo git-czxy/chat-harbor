@@ -1,0 +1,88 @@
+{
+  "project": "ChatHarbor",
+  "version": "0.5.0",
+  "current_platform": "ChatGPT",
+  "direct_upstream": "https://github.com/OwlCt/ChatGPT-Export",
+  "baseline_version": "v0.4",
+  "build_note": "Phase-3 existing-change write executed successfully; fixed locale normalization regression and kept main picker open for local existing-change sync.",
+  "checks": {
+    "node_check": "PASS",
+    "preflight_dialog": "PASS",
+    "verify_only_mode": "PASS",
+    "shared_classifier": "PASS",
+    "legacy_confirm_removed": "PASS",
+    "existing_change_write_gate": "PASS_STATIC",
+    "locale_taxonomy_zh_Hans_zh_Hant": "PASS",
+    "locale_detection_priority_fix": "PASS_STATIC",
+    "existing_change_keeps_main_dialog": "PASS_STATIC",
+    "existing_change_write_runtime": "PASS_REPORTED"
+  },
+  "real_use_phase_1": {
+    "remote_conversations": 393,
+    "local_conversations": 282,
+    "new": 111,
+    "remote_update_candidates": 1,
+    "title_only_candidates": 0,
+    "unchanged": 281,
+    "local_only": 0,
+    "duplicate_conversation_id": 0,
+    "status": "PASS"
+  },
+  "files": {
+    "ACKNOWLEDGEMENTS.md": {
+      "sha256": "8988618f793e2cef08acbddd1b2a2fcb4b6ed69deade7049d76b96ba2fc0e3bb",
+      "bytes": 763
+    },
+    "BASELINE.md": {
+      "sha256": "d6ec34e35bd2f027d7d7dd5777479abfff0bea02977fa3f04c479c5493e5002d",
+      "bytes": 468
+    },
+    "CHANGELOG.md": {
+      "sha256": "227a02df2fa2483d7e120555ba7fd89dadf50de5c395f91b13c36df4eef3b67c",
+      "bytes": 2385
+    },
+    "ChatHarbor-v0.4-baseline.user.js": {
+      "sha256": "83b47fb7527517cb7c2cc82dd3352b6f91078076568dda69b967fa730916597c",
+      "bytes": 153354
+    },
+    "ChatHarbor-v0.5.0.user.js": {
+      "sha256": "28b14a302fbcce1a0c4774c4e2ddf35c3ae3eb48f3ea61b5327987282af2c411",
+      "bytes": 199585
+    },
+    "LICENSE": {
+      "sha256": "ebfae1e5878121eedf348e4eabc270287e7735ec00acb0e5f0a62a0538bf216a",
+      "bytes": 1061
+    },
+    "README.md": {
+      "sha256": "f0e2d52c36c01e8b26dae5d93f9d3b52c6c2976a7c783c704f6f917072f20ac3",
+      "bytes": 4454
+    },
+    "TEST_PLAN.md": {
+      "sha256": "a22258a7d342d0303afce57a1bd1d42ab60d89562f64b0ec9023290451658edf",
+      "bytes": 4303
+    }
+  },
+  "real_use_phase_2": {
+    "conversation_id": "6a95940b-8f34-83ee-a167-329a64a294a5",
+    "title": "每日重点趋势简报",
+    "local_update_time": "2026-09-10 09:24:26",
+    "remote_update_time": "2026-09-13 09:39:26",
+    "content_changed": true,
+    "title_changed": false,
+    "classification": "UPDATED",
+    "write_performed": false,
+    "status": "PASS"
+  },
+  "real_use_phase_3": {
+    "mode": "sync_existing",
+    "planned": 1,
+    "succeeded": 1,
+    "failed": 0,
+    "updated": 1,
+    "updated_and_renamed": 0,
+    "renamed_only": 0,
+    "metadata_only": 0,
+    "runtime_status": "PASS",
+    "file_level_verification": "PENDING"
+  }
+}
