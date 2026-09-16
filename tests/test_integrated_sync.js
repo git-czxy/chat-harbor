@@ -2,7 +2,8 @@ const fs = require('fs');
 const assert = require('assert');
 const { webcrypto } = require('crypto');
 global.crypto = webcrypto;
-global.document={getElementById:()=>null};
+global.document={getElementById:()=>null,addEventListener:()=>{},hidden:false};
+global.window={addEventListener:()=>{}};
 global.localStorage={getItem:()=>null,setItem:()=>{}};
 const CH_SIGNATURE_VERSION = 'sha256-current_node+mapping-v1';
 
@@ -38,6 +39,7 @@ async function chReadManifest(){throw new Error('not used');}
 const layer=fs.readFileSync(require('path').join(__dirname,'integrated_sync_layer.js'),'utf8');
 eval(layer);
 chContentSignature = async (c)=> c.__sig || 'sig';
+chShowIntegratedSyncReport = ()=>{};
 
 (async()=>{
   // Remote-universe merge must collapse discovery duplicates by canonical ID.
@@ -198,6 +200,28 @@ chContentSignature = async (c)=> c.__sig || 'sig';
     /完整远端列表/
   );
 
+  // Streaming sync must classify and commit each fetched conversation before fetching the next one.
+  const streamOrder=[];
+  chScanLocalArchiveReadOnly = async()=>({manifestExists:false,manifestReadable:true});
+  chBuildPreflightPlan = ()=>({
+    items:[
+      {id:'S1',action:'NEW',needs_detail_fetch:true,remote:{id:'S1',title:'S1',update_time:1},local:null},
+      {id:'S2',action:'NEW',needs_detail_fetch:true,remote:{id:'S2',title:'S2',update_time:1},local:null}
+    ],
+    summary:{scopeRemote:2,maximumFetchRequired:2,localOnlyReliable:true,localOnlyCount:0}
+  });
+  chReadManifest = async()=>({schema_version:1,identity:'conversation_id',conversations:{}});
+  getConversation = async(id)=>{streamOrder.push(`fetch:${id}`);return {conversation_id:id,title:id,update_time:1,__sig:`sig-${id}`};};
+  chApplyClassifiedSyncItem = async({classifiedItem})=>{streamOrder.push(`commit:${classifiedItem.id}`);return {mode:'FILES_AND_MANIFEST',record:{},cleanup:{warnings:[]}};};
+  const streamResult=await chRunIntegratedDirectorySync({
+    rootHandle:{},remoteList:[{id:'S1'},{id:'S2'}],selectedIds:new Set(['S1','S2']),remoteUniverseComplete:true,
+    networkPolicy:{speedIndex:0,batchSize:1,batchPauseMinSec:0,batchPauseMaxSec:0,maxRetries:0}
+  });
+  assert.deepStrictEqual(streamOrder,['fetch:S1','commit:S1','fetch:S2','commit:S2']);
+  assert.strictEqual(streamResult.sync.succeeded,2);
+  assert.strictEqual(streamResult.verification.detailFetchCount,2);
+  chEndControlledRun();
+
   console.log('PASS final classification matrix');
   console.log('PASS canonical remote-universe merge');
   console.log('PASS attachment link relocation');
@@ -207,4 +231,5 @@ chContentSignature = async (c)=> c.__sig || 'sig';
   console.log('PASS in-place METADATA_ONLY manifest-only commit');
   console.log('PASS tracked-only cleanup preserves legacy-untracked assets');
   console.log('PASS incomplete full-sync stop condition');
+  console.log('PASS streaming fetch -> classify -> atomic commit ordering');
 })().catch(e=>{console.error(e);process.exit(1);});

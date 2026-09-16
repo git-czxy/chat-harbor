@@ -35,7 +35,7 @@ text = text.replace(
     "// @author       huhu\n",
     "// @name         ChatHarbor Integrated Sync (Clean Lineage)\n"
     "// @name:zh-CN   ChatHarbor 集成同步版（干净来源）\n"
-    "// @version      0.0.8.0\n"
+    "// @version      0.0.9.0\n"
     "// @description  Clean-lineage archive sync with conservative pacing, pause/cancel, and version-aware selective directory sync.\n"
     "// @description:zh-CN 干净来源的本地档案同步：保守节奏、暂停/取消、版本识别与选择性目录同步。\n"
     "// @author       huhu; ChatHarbor contributors\n"
@@ -154,7 +154,9 @@ directory_writer = r'''
         cancelReason: null,
         phase: 'idle',
         policy: chLoadNetworkPolicy(),
-        waiters: []
+        waiters: [],
+        sleepDeadline: null,
+        sleepPrimary: null
     };
 
     function chBeginControlledRun(policy = null) {
@@ -166,6 +168,8 @@ directory_writer = r'''
         chSyncRun.phase = 'starting';
         chSyncRun.policy = chSaveNetworkPolicy(policy || chLoadNetworkPolicy());
         chSyncRun.waiters = [];
+        chSyncRun.sleepDeadline = null;
+        chSyncRun.sleepPrimary = null;
         chUpdateRunControlUi();
         return chSyncRun;
     }
@@ -178,6 +182,8 @@ directory_writer = r'''
         chSyncRun.cancelRequested = false;
         chSyncRun.cancelReason = null;
         chSyncRun.phase = 'idle';
+        chSyncRun.sleepDeadline = null;
+        chSyncRun.sleepPrimary = null;
         chUpdateRunControlUi();
     }
 
@@ -230,18 +236,60 @@ directory_writer = r'''
     }
 
     async function chControlledSleep(ms, primary = '保守网络等待', secondary = '') {
-        let remaining = Math.max(0, Math.round(Number(ms) || 0));
-        while (remaining > 0) {
-            await chControlCheckpoint();
-            const chunk = Math.min(1000, remaining);
-            if (remaining >= 1000) {
-                chSetProgress(primary, secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`, null);
+        const duration = Math.max(0, Math.round(Number(ms) || 0));
+        const deadline = Date.now() + duration;
+        chSyncRun.sleepDeadline = deadline;
+        chSyncRun.sleepPrimary = primary;
+        let systemSuspended = false;
+        try {
+            while (true) {
+                await chControlCheckpoint();
+                const remaining = deadline - Date.now();
+                if (remaining <= 0) break;
+                if (remaining >= 1000) {
+                    chSetProgress(primary, secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`, null);
+                }
+                const chunk = Math.min(1000, remaining);
+                const before = Date.now();
+                await sleep(chunk);
+                const elapsed = Date.now() - before;
+                // Browsers suspend timers during OS sleep / long background throttling.
+                // Detect elapsed wall time instead of counting timer ticks.
+                if (elapsed > chunk + 15000) systemSuspended = true;
             }
-            await sleep(chunk);
-            remaining -= chunk;
+        } finally {
+            chSyncRun.sleepDeadline = null;
+            chSyncRun.sleepPrimary = null;
+        }
+        await chControlCheckpoint();
+        if (systemSuspended && !chSyncRun.paused && !chSyncRun.cancelRequested) {
+            const guardMs = chNetworkDelayMs(chSyncRun.policy);
+            const guardDeadline = Date.now() + guardMs;
+            while (Date.now() < guardDeadline) {
+                await chControlCheckpoint('wake-guard');
+                const remaining = guardDeadline - Date.now();
+                chSetProgress('恢复保护等待', `检测到系统休眠/长时间挂起 · ${Math.max(1, Math.ceil(remaining / 1000))} 秒后继续`, null);
+                await sleep(Math.min(1000, Math.max(1, remaining)));
+            }
         }
         await chControlCheckpoint();
     }
+
+    function chReconcileRuntimeState() {
+        if (!chSyncRun.active) return;
+        chUpdateRunControlUi();
+        // Absolute deadlines are evaluated by chControlledSleep when timers resume.
+        // User pause remains authoritative and is never auto-resumed here.
+        if (chSyncRun.paused) return;
+        if (chSyncRun.sleepDeadline && Date.now() >= chSyncRun.sleepDeadline) {
+            const waiters = chSyncRun.waiters.splice(0);
+            waiters.forEach(resolve => { try { resolve(); } catch (_) {} });
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) chReconcileRuntimeState(); });
+    window.addEventListener('focus', chReconcileRuntimeState);
+    window.addEventListener('pageshow', chReconcileRuntimeState);
 
     function chErrorStatus(err) {
         if (Number.isFinite(err?.status)) return Number(err.status);
@@ -2202,7 +2250,9 @@ directory_writer = r'''
         includeAttachments = false,
         remoteUniverseComplete = true,
         remoteUniverseNote = null,
-        networkPolicy = null
+        networkPolicy = null,
+        onItemClassified = null,
+        onItemCommitted = null
     }) {
         const selected = selectedIds instanceof Set && selectedIds.size > 0 ? selectedIds : null;
         if (!selected && !remoteUniverseComplete) {
@@ -2222,29 +2272,16 @@ directory_writer = r'''
             remoteUniverseComplete,
             remoteUniverseNote
         });
-
-        chSetProgress('目录同步', `预检完成 · 最多抓取 ${plan.summary.maximumFetchRequired} 条详情`, 5);
-        let verification;
-        try {
-            verification = await chVerifyPreflightCandidates({ plan, workspaceId });
-        } catch (err) {
-            if (chIsCancellation(err)) {
-                chSetProgress('目录同步已取消', '已停止后续详情请求；尚未进入写入阶段。', 100);
-                return {
-                    localScan,
-                    plan,
-                    verification: { items: [], counts: {}, detailFetchCount: 0, cancelled: true },
-                    sync: { attempted: 0, succeeded: 0, failed: 0, manifestOnly: 0, fileCommits: 0, cleanupWarnings: [], results: [], failures: [], cancelled: true }
-                };
-            }
-            throw err;
+        const fetchTotal = plan.items.filter(item => item.needs_detail_fetch && item.action !== 'ERROR' && item.action !== 'DUPLICATE').length;
+        if (fetchTotal > 0 && !await ensureAccessToken()) {
+            throw new Error('无法获取 Access Token，无法执行 detail verification。');
         }
 
-        const actionable = verification.items.filter(item => CH_FINAL_SYNC_ACTIONS.has(item.finalAction));
         const manifest = await chReadManifest(rootHandle);
         const btn = getExportButton();
+        const verification = { items: [], counts: {}, detailFetchCount: 0, cancelled: false };
         const sync = {
-            attempted: actionable.length,
+            attempted: 0,
             succeeded: 0,
             failed: 0,
             manifestOnly: 0,
@@ -2254,65 +2291,107 @@ directory_writer = r'''
             failures: [],
             cancelled: false
         };
+        let fetchIndex = 0;
+        const totalItems = Math.max(1, plan.items.length);
 
-        for (let i = 0; i < actionable.length; i++) {
+        for (let i = 0; i < plan.items.length; i++) {
+            let classified = null;
+            const item = plan.items[i];
             try {
-                await chControlCheckpoint('apply-sync');
-            } catch (err) {
-                if (chIsCancellation(err)) {
-                    sync.cancelled = true;
-                    break;
+                await chControlCheckpoint('stream-sync');
+                if (!item.needs_detail_fetch || item.action === 'ERROR' || item.action === 'DUPLICATE') {
+                    classified = {
+                        ...item,
+                        finalAction: item.action,
+                        needs_sync: false,
+                        finalReasons: item.reasons || []
+                    };
+                } else {
+                    const title = item.remote?.title || item.local?.title || item.id;
+                    chSetProgress(
+                        '核验并同步',
+                        `${fetchIndex + 1}/${fetchTotal} · ${String(title).slice(0, 58)}`,
+                        Math.min(98, Math.round((i / totalItems) * 98))
+                    );
+                    try {
+                        const convData = await chGetConversationConservative(item.id, workspaceId);
+                        verification.detailFetchCount++;
+                        fetchIndex++;
+                        classified = await chClassifyFetchedConversation(item, convData);
+                    } catch (err) {
+                        if (chIsCancellation(err)) throw err;
+                        verification.detailFetchCount++;
+                        fetchIndex++;
+                        classified = {
+                            ...item,
+                            finalAction: 'ERROR',
+                            needs_sync: false,
+                            finalReasons: ['DETAIL_FETCH_OR_CLASSIFICATION_FAILED'],
+                            error: err?.message || String(err)
+                        };
+                    }
                 }
-                throw err;
-            }
-            const item = actionable[i];
-            const title = item.convData?.title || item.remote?.title || item.id;
-            chSetProgress(
-                '应用同步计划',
-                `${i + 1}/${actionable.length} · [${item.finalAction}] ${String(title).slice(0, 54)}`,
-                50 + (actionable.length ? Math.round((i / actionable.length) * 48) : 48)
-            );
-            try {
-                const applied = await chApplyClassifiedSyncItem({
-                    rootHandle,
-                    classifiedItem: item,
-                    manifest,
-                    workspaceId,
-                    includeAttachments,
-                    btn,
-                    conversationIndex: i,
-                    conversationTotal: actionable.length || 1
-                });
-                sync.succeeded++;
-                if (applied.mode === 'MANIFEST_ONLY') sync.manifestOnly++;
-                if (applied.mode === 'FILES_AND_MANIFEST') sync.fileCommits++;
-                sync.cleanupWarnings.push(...(applied.cleanup?.warnings || []).map(w => `${item.id}: ${w}`));
-                sync.results.push(applied);
-                if (includeAttachments && applied?.record?.attachment_detected > 0 && i < actionable.length - 1) {
+
+                verification.items.push(classified);
+                verification.counts[classified.finalAction] = (verification.counts[classified.finalAction] || 0) + 1;
+                if (typeof onItemClassified === 'function') {
+                    try { onItemClassified(classified, { processed: i + 1, total: plan.items.length }); } catch (_) {}
+                }
+
+                if (CH_FINAL_SYNC_ACTIONS.has(classified.finalAction)) {
+                    sync.attempted++;
+                    try {
+                        const applied = await chApplyClassifiedSyncItem({
+                            rootHandle,
+                            classifiedItem: classified,
+                            manifest,
+                            workspaceId,
+                            includeAttachments,
+                            btn,
+                            conversationIndex: i,
+                            conversationTotal: totalItems
+                        });
+                        sync.succeeded++;
+                        if (applied.mode === 'MANIFEST_ONLY') sync.manifestOnly++;
+                        if (applied.mode === 'FILES_AND_MANIFEST') sync.fileCommits++;
+                        sync.cleanupWarnings.push(...(applied.cleanup?.warnings || []).map(w => `${classified.id}: ${w}`));
+                        sync.results.push(applied);
+                        if (typeof onItemCommitted === 'function') {
+                            try { onItemCommitted(classified, applied); } catch (_) {}
+                        }
+                    } catch (err) {
+                        if (chIsCancellation(err)) throw err;
+                        sync.failed++;
+                        sync.failures.push({
+                            id: classified.id,
+                            action: classified.finalAction,
+                            error: err?.message || String(err)
+                        });
+                    }
+                }
+
+                // One conservative network cadence governs the next detail request.  This runs
+                // after the current conversation has been fully classified and atomically committed.
+                if (item.needs_detail_fetch && fetchIndex < fetchTotal) {
                     const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
-                    const completed = i + 1;
-                    if (completed % policy.batchSize === 0) {
+                    if (fetchIndex % policy.batchSize === 0) {
                         const pauseMs = chNetworkBatchPauseMs(policy);
                         await chControlledSleep(
                             pauseMs,
-                            '附件同步批次暂停',
-                            `已完成 ${completed}/${actionable.length} 个会话 · 暂停约 ${Math.round(pauseMs / 1000)} 秒`
+                            '保守批次暂停',
+                            `已处理 ${fetchIndex}/${fetchTotal} 个远端详情 · 下一批前暂停约 ${Math.round(pauseMs / 1000)} 秒`
                         );
                     } else {
-                        await chControlledSleep(chNetworkDelayMs(policy), '附件同步请求间隔', `${completed}/${actionable.length}`);
+                        await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`);
                     }
                 }
             } catch (err) {
                 if (chIsCancellation(err)) {
+                    verification.cancelled = true;
                     sync.cancelled = true;
                     break;
                 }
-                sync.failed++;
-                sync.failures.push({
-                    id: item.id,
-                    action: item.finalAction,
-                    error: err?.message || String(err)
-                });
+                throw err;
             }
         }
 
@@ -2320,7 +2399,7 @@ directory_writer = r'''
             sync.cancelled ? '目录同步已取消' : (sync.failed ? '目录同步完成（存在失败）' : '目录同步完成'),
             sync.cancelled
                 ? `已安全提交 ${sync.succeeded} 个会话；未开始的会话保持不变，下次可继续。`
-                : `成功 ${sync.succeeded}/${sync.attempted} · 未变化 ${verification.counts.UNCHANGED || 0} · 异常 ${(verification.counts.ERROR || 0) + (verification.counts.DUPLICATE || 0)}`,
+                : `写入成功 ${sync.succeeded} · 未变化 ${verification.counts.UNCHANGED || 0} · 异常 ${(verification.counts.ERROR || 0) + (verification.counts.DUPLICATE || 0)}`,
             100
         );
 
@@ -2329,6 +2408,7 @@ directory_writer = r'''
         console.log('[ChatHarbor Integrated Sync]', result);
         return result;
     }
+
 
 '''
 text = text.replace(anchor, directory_writer + anchor, 1)
@@ -2636,7 +2716,7 @@ attachment_hint_new = "默认关闭；开启后处理时间与本地占用可能
 text = text.replace(attachment_hint_old, attachment_hint_new)
 
 
-# ======================== ChatHarbor 0.0.8.0 Desktop Workspace UI ========================
+# ======================== ChatHarbor 0.0.9.0 Desktop Workspace + Streaming Sync UI ========================
 # The sync/runtime core above remains unchanged. This final bounded patch replaces only the
 # picker presentation, report presentation, and launcher presentation.
 
@@ -2723,11 +2803,12 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             mode: initialMode,
             workspaceId: initialWorkspaceId,
             list: [], filtered: [], selected: new Set(), query: '',
-            projectFilter: 'all', archived: 'active', syncStatus: 'all',
+            projectFilter: 'all', archived: 'all', syncStatus: 'all',
             timeField: 'update', timeRange: 'all', sort: 'desc', startDate: '', endDate: '',
             loading: true, pageSize: 100, visibleCount: 100, includeAttachments: initialAttachments,
             networkPolicy: chLoadNetworkPolicy(), rootHandle: null, localScan: null, lastPlan: null,
-            lastResult: null, syncStatusById: new Map(), lastSelectedIndex: null
+            lastResult: null, syncStatusById: new Map(), lastSelectedIndex: null,
+            remoteUniverse: [], remoteUniverseComplete: false, remoteUniverseNote: null
         };
 
         const modeLabel = value => value === 'team' ? chT('团队空间','Team workspace') : value === 'project' ? chT('项目空间','Projects') : chT('个人空间','Personal');
@@ -2759,7 +2840,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                     <strong style="font-size:18px;">ChatHarbor</strong>
                     <span id="ch-header-summary" style="font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"></span>
                 </div>
-                <button id="back-btn" style="padding:7px 11px; border:1px solid #d1d5db; border-radius:7px; background:#fff; cursor:pointer;">${chT('关闭','Close')}</button>
+                <div style="display:flex;gap:7px;"><button id="ch-refresh-btn" style="padding:7px 11px; border:1px solid #d1d5db; border-radius:7px; background:#fff; cursor:pointer;">${chT('刷新','Refresh')}</button><button id="back-btn" style="padding:7px 11px; border:1px solid #d1d5db; border-radius:7px; background:#fff; cursor:pointer;">${chT('关闭','Close')}</button></div>
             </div>
             <div style="padding:10px 14px; border-bottom:1px solid #e5e7eb; display:grid; grid-template-columns:minmax(260px,1fr) 118px 150px 120px 150px 118px; gap:8px; align-items:center; flex:0 0 auto;">
                 <input id="conv-search" type="text" placeholder="${chT('搜索标题/项目名/ID','Search title/project/ID')}" style="min-width:0; padding:8px 10px; border:1px solid #d1d5db; border-radius:7px;">
@@ -2768,7 +2849,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                 </select>
                 <select id="filter-project" style="padding:8px; border:1px solid #d1d5db; border-radius:7px; background:#fff;"><option value="all">${chT('项目：全部','Project: all')}</option></select>
                 <select id="filter-archived" style="padding:8px; border:1px solid #d1d5db; border-radius:7px; background:#fff;">
-                    <option value="active">${chT('未归档','Active')}</option><option value="archived">${chT('已归档','Archived')}</option><option value="all">${chT('归档：全部','Archive: all')}</option>
+                    <option value="all">${chT('归档：全部','Archive: all')}</option><option value="active">${chT('未归档','Active')}</option><option value="archived">${chT('已归档','Archived')}</option>
                 </select>
                 <select id="filter-sync-status" style="padding:8px; border:1px solid #d1d5db; border-radius:7px; background:#fff;">
                     <option value="all">${chT('同步状态：全部','Sync: all')}</option>
@@ -2789,8 +2870,8 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             <div style="display:grid; grid-template-columns:minmax(0,1fr) 310px; gap:12px; padding:12px 14px 14px; flex:1 1 auto; min-height:0; background:#f8fafc;">
                 <section style="min-width:0; min-height:0; display:flex; flex-direction:column;">
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:8px; flex:0 0 auto;">
-                        <div id="conv-status" style="font-size:12px; color:#6b7280;">${chT('正在加载列表…','Loading…')}</div>
-                        <div style="display:flex; gap:6px;"><button id="select-all-btn" style="padding:6px 9px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer;">${chT('全选匹配','Select matches')}</button><button id="clear-all-btn" style="padding:6px 9px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer;">${chT('清空选择','Clear')}</button></div>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#374151;cursor:pointer;white-space:nowrap;"><input id="select-all-checkbox" type="checkbox"><span>${chT('全选','Select all')}</span></label>
+                        <div id="conv-status" style="font-size:12px; color:#6b7280; text-align:right;">${chT('正在加载列表…','Loading…')}</div>
                     </div>
                     <div id="conv-list" style="flex:1 1 auto; min-height:0; overflow:auto; border:1px solid #e5e7eb; border-radius:9px; padding:8px; background:#fff;"></div>
                 </section>
@@ -2798,8 +2879,8 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                     <div style="padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
                         <strong style="font-size:13px;">${chT('本地归档','Local archive')}</strong>
                         <div id="ch-archive-path" style="margin-top:6px; font-size:12px; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${chT('尚未选择目录','No directory selected')}</div>
-                        <div id="ch-archive-summary" style="margin-top:6px; font-size:12px; line-height:1.6; color:#4b5563;">Remote — · Local — · ${chT('待同步','Pending')} —</div>
-                        <div style="display:flex; gap:6px; margin-top:8px;"><button id="ch-choose-directory-btn" style="flex:1; padding:7px 8px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer;">${chT('选择目录','Choose')}</button><button id="preflight-plan-btn" style="flex:1; padding:7px 8px; border:1px solid #6366f1; border-radius:6px; background:#fff; color:#4338ca; cursor:pointer; font-weight:600;">${chT('目录预检','Preflight')}</button></div>
+                        <div id="ch-archive-summary" style="margin-top:6px; font-size:12px; line-height:1.6; color:#4b5563;">${chT('等待选择目录','Waiting for directory')}</div>
+                        <div style="display:flex; gap:6px; margin-top:8px;"><button id="ch-choose-directory-btn" style="flex:1; padding:7px 8px; border:1px solid #d1d5db; border-radius:6px; background:#fff; cursor:pointer;">${chT('选择目录','Choose')}</button><button id="preflight-plan-btn" style="flex:1; padding:7px 8px; border:1px solid #6366f1; border-radius:6px; background:#fff; color:#4338ca; cursor:pointer; font-weight:600;">${chT('重新扫描本地','Rescan local')}</button></div>
                     </div>
                     <details style="padding:9px 10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;" open>
                         <summary id="ch-network-policy-summary" style="cursor:pointer; font-size:13px; font-weight:600;">${chT('网络策略','Network policy')} · ${chNetworkPolicySummary(state.networkPolicy)}</summary>
@@ -2825,9 +2906,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                         <strong id="ch-result-title" style="font-size:13px;"></strong><pre id="ch-result-summary" style="margin:7px 0 0;white-space:pre-wrap;font:12px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#374151;"></pre><button id="ch-copy-report-btn" style="margin-top:7px;padding:5px 8px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;">${chT('复制详细报告','Copy details')}</button>
                     </div>
                     <div style="margin-top:auto; padding:10px; border:1px solid #d1d5db; border-radius:9px; background:#fff;">
-                        <div id="ch-selection-summary" style="font-size:12px;color:#4b5563;margin-bottom:8px;">${chT('已选 0','Selected 0')}</div>
-                        <button id="sync-directory-btn" style="width:100%;padding:10px;border:none;border-radius:7px;background:#10a37f;color:#fff;cursor:pointer;font-weight:700;">${chT('同步选中','Sync selected')}</button>
-                        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px;"><button id="sync-filtered-btn" style="padding:7px;border:1px solid #10a37f;border-radius:6px;background:#fff;color:#0f766e;cursor:pointer;">${chT('同步筛选结果','Sync filtered')}</button><button id="sync-all-btn" style="padding:7px;border:1px solid #10a37f;border-radius:6px;background:#fff;color:#0f766e;cursor:pointer;">${chT('同步全部','Sync all')}</button></div>
+                        <button id="sync-directory-btn" style="width:100%;padding:11px 14px;border:none;border-radius:7px;background:#10a37f;color:#fff;cursor:pointer;font-weight:700;white-space:nowrap;">${chT('同步选中','Sync selected')}</button>
                     </div>
                 </aside>
             </div>`;
@@ -2852,10 +2931,8 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         const chooseDirBtn = $('ch-choose-directory-btn');
         const preflightBtn = $('preflight-plan-btn');
         const syncSelectedBtn = $('sync-directory-btn');
-        const syncFilteredBtn = $('sync-filtered-btn');
-        const syncAllBtn = $('sync-all-btn');
-        const selectAllBtn = $('select-all-btn');
-        const clearAllBtn = $('clear-all-btn');
+        const selectAllCheckbox = $('select-all-checkbox');
+        const refreshBtn = $('ch-refresh-btn');
         const closeBtn = $('back-btn');
         const pauseSyncBtn = $('ch-pause-sync-btn');
         const cancelSyncBtn = $('ch-cancel-sync-btn');
@@ -2870,7 +2947,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
 
         const updateHeader = () => {
             const root = state.rootHandle?.name ? ` · ${state.rootHandle.name}` : '';
-            $('ch-header-summary').textContent = `${modeLabel(state.mode)} · Remote ${state.list.length}${root}`;
+            $('ch-header-summary').textContent = `${modeLabel(state.mode)} · ChatGPT${root}`;
         };
         const updateTimeSummary = () => {
             const range = state.timeRange === '7d' ? chT('最近7天','7 days') : state.timeRange === '30d' ? chT('最近30天','30 days') : state.timeRange === 'custom' ? chT('自定义','Custom') : chT('不限','All');
@@ -2883,7 +2960,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             if (state.syncStatus === 'error') return status === 'ERROR' || status === 'DUPLICATE';
             return status === state.syncStatus;
         };
-        const projectKey = item => item.projectId ? `id:${item.projectId}` : item.projectTitle ? `title:${item.projectTitle}` : 'none';
+        const projectKey = item => item.projectId ? `id:${item.projectId}` : item.projectTitle ? `title:${item.projectTitle}` : item.__chProjectState === 'unknown' ? 'unknown' : 'none';
 
         const rebuildProjectOptions = () => {
             const current = state.projectFilter;
@@ -2893,6 +2970,7 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             const add = (value, label) => { const o=document.createElement('option');o.value=value;o.textContent=label;projectSelect.appendChild(o); };
             add('all', chT('项目：全部','Project: all'));
             add('none', chT('无项目','No project'));
+            if (state.list.some(item => projectKey(item) === 'unknown')) add('unknown', chT('归属未知','Unknown project'));
             [...map.entries()].sort((a,b)=>a[1].localeCompare(b[1])).forEach(([value,label])=>add(value,label));
             state.projectFilter = [...projectSelect.options].some(o=>o.value===current) ? current : 'all';
             projectSelect.value = state.projectFilter;
@@ -2945,20 +3023,21 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             state.visibleCount = state.pageSize;
         };
         const updateArchiveSummary = () => {
-            const p=state.lastPlan?.summary;
             $('ch-archive-path').textContent = state.rootHandle?.name || chT('尚未选择目录','No directory selected');
-            $('ch-archive-summary').textContent = p
-                ? `Remote ${p.remoteUnique} · Local ${p.local} · ${chT('待核验上限','Max verify')} ${p.maximumFetchRequired} · ${chT('仅本地','Local only')} ${p.localOnlyReliable?p.localOnlyCount:'?'}`
-                : `Remote ${state.list.length} · Local — · ${chT('待同步','Pending')} —`;
-            $('ch-selection-summary').textContent = `${chT('已选','Selected')} ${state.selected.size} · ${chT('匹配','Matched')} ${state.filtered.length} / ${state.list.length}`;
+            $('ch-archive-summary').textContent = state.rootHandle
+                ? (state.lastPlan ? chT('本地扫描完成 · 同步状态已更新','Local scan complete · sync states updated') : chT('目录已选择 · 等待扫描','Directory selected · waiting for scan'))
+                : chT('选择目录后将自动执行只读扫描','A read-only scan runs automatically after choosing a directory');
             updateHeader();
         };
         const updateControls = () => {
             const disabled = state.loading || chSyncRun.active;
-            [spaceSelect,projectSelect,archivedSelect,syncStatusSelect,timeFieldSelect,timeRangeSelect,sortSelect,startDateInput,endDateInput,chooseDirBtn,preflightBtn,selectAllBtn,clearAllBtn].forEach(el=>{if(el)el.disabled=disabled;});
+            [spaceSelect,projectSelect,archivedSelect,syncStatusSelect,timeFieldSelect,timeRangeSelect,sortSelect,startDateInput,endDateInput,refreshBtn].forEach(el=>{if(el)el.disabled=disabled;});
+            chooseDirBtn.disabled = disabled;
+            chooseDirBtn.textContent = state.loading ? chT('等待远端列表…','Waiting for remote…') : state.rootHandle ? chT('更换目录','Change directory') : chT('选择目录','Choose directory');
+            chooseDirBtn.title = state.loading ? chT('为避免远端/本地状态交叉，远端列表加载完成后再选择目录。','Directory selection is enabled after remote loading to avoid mixed generations.') : '';
+            preflightBtn.disabled = disabled || !state.rootHandle;
+            if (selectAllCheckbox) selectAllCheckbox.disabled = disabled || state.filtered.length===0;
             syncSelectedBtn.disabled = disabled || state.selected.size===0;
-            syncFilteredBtn.disabled = disabled || state.filtered.length===0;
-            syncAllBtn.disabled = disabled || state.list.length===0;
             syncSelectedBtn.style.opacity = syncSelectedBtn.disabled ? '.45' : '1';
             syncSelectedBtn.textContent = state.selected.size ? `${chT('同步选中','Sync selected')} ${state.selected.size}` : chT('请选择对话','Select conversations');
         };
@@ -2966,9 +3045,15 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             const listEl=$('conv-list'), statusEl=$('conv-status');
             listEl.innerHTML='';
             updateControls(); updateArchiveSummary();
-            if(state.loading){statusEl.textContent=chT('正在加载列表…','Loading…');return;}
-            const visible=Math.min(state.visibleCount,state.filtered.length);
-            statusEl.textContent=`${chT('共','Total')} ${state.list.length} · ${chT('匹配','Matched')} ${state.filtered.length} · ${chT('显示','Shown')} ${visible} · ${chT('已选','Selected')} ${state.selected.size}`;
+            if(state.loading){statusEl.textContent=chT('正在加载列表…','Loading…');if(selectAllCheckbox){selectAllCheckbox.checked=false;selectAllCheckbox.indeterminate=false;}return;}
+            const matchedSelected = state.filtered.reduce((n,item)=>n+(state.selected.has(item.id)?1:0),0);
+            const hiddenSelected = Math.max(0,state.selected.size-matchedSelected);
+            if(selectAllCheckbox){selectAllCheckbox.checked=state.filtered.length>0&&matchedSelected===state.filtered.length;selectAllCheckbox.indeterminate=matchedSelected>0&&matchedSelected<state.filtered.length;}
+            const countParts=[`${chT('已选','Selected')} ${state.selected.size}`];
+            if(hiddenSelected>0)countParts.push(`${chT('当前匹配中','in current matches')} ${matchedSelected}`);
+            if(state.filtered.length===state.list.length)countParts.push(`${chT('共','Total')} ${state.list.length}`);
+            else countParts.push(`${chT('匹配','Matched')} ${state.filtered.length} / ${chT('共','Total')} ${state.list.length}`);
+            statusEl.textContent=countParts.join(' · ');
             if(!state.filtered.length){const e=document.createElement('div');e.textContent=chT('没有匹配的对话。','No matching conversations.');e.style.cssText='color:#9ca3af;padding:12px 8px;';listEl.appendChild(e);return;}
             state.filtered.slice(0,state.visibleCount).forEach((item,index)=>{
                 const row=document.createElement('label');
@@ -2977,10 +3062,12 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
                 cb.onclick=e=>{const checked=cb.checked;if(e.shiftKey && state.lastSelectedIndex!=null){const a=Math.min(state.lastSelectedIndex,index),b=Math.max(state.lastSelectedIndex,index);for(let i=a;i<=b;i++){const id=state.filtered[i]?.id;if(!id)continue;if(checked)state.selected.add(id);else state.selected.delete(id);}}else{if(checked)state.selected.add(item.id);else state.selected.delete(item.id);}state.lastSelectedIndex=index;renderList();};
                 const content=document.createElement('div');content.style.minWidth='0';
                 const title=document.createElement('div');title.textContent=item.title||'Untitled Conversation';title.style.cssText='font-size:13px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-                const meta=document.createElement('div');const time=formatTimestamp(state.timeField==='create'?item.create_time:item.update_time)||chT('未知','Unknown');meta.textContent=`${item.projectTitle||chT('无项目','No project')} · ${item.is_archived?chT('已归档','Archived'):chT('未归档','Active')} · ${state.timeField==='create'?chT('创建','Created'):chT('更新','Updated')} ${time}`;meta.style.cssText='font-size:11px;color:#6b7280;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                const meta=document.createElement('div');const time=formatTimestamp(state.timeField==='create'?item.create_time:item.update_time)||chT('未知','Unknown');const projectText=item.projectTitle|| (item.__chProjectState==='unknown'?chT('归属未知','Project unknown'):chT('无项目','No project'));meta.textContent=`${projectText} · ${state.timeField==='create'?chT('创建','Created'):chT('更新','Updated')} ${time}`;meta.style.cssText='font-size:11px;color:#6b7280;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
                 content.append(title,meta);row.append(cb,content);
-                const s=state.syncStatusById.get(item.id);const badge=document.createElement('span');if(s){const [bg,fg]=statusColor(s);badge.textContent=statusLabel(s);badge.style.cssText=`font-size:11px;padding:3px 7px;border-radius:999px;background:${bg};color:${fg};white-space:nowrap;`;}else{badge.textContent='';}
-                row.appendChild(badge);listEl.appendChild(row);
+                const badges=document.createElement('div');badges.style.cssText='display:flex;gap:5px;align-items:center;justify-content:flex-end;flex-wrap:wrap;';
+                const s=state.syncStatusById.get(item.id);if(s){const [bg,fg]=statusColor(s);const badge=document.createElement('span');badge.textContent=statusLabel(s);badge.style.cssText=`font-size:11px;padding:3px 7px;border-radius:999px;background:${bg};color:${fg};white-space:nowrap;`;badges.appendChild(badge);}
+                const archiveBadge=document.createElement('span');archiveBadge.textContent=item.is_archived?chT('已归档','Archived'):chT('未归档','Active');archiveBadge.style.cssText=item.is_archived?'font-size:11px;padding:3px 7px;border-radius:999px;background:#e5e7eb;color:#374151;white-space:nowrap;':'font-size:11px;padding:3px 7px;border-radius:999px;background:#f3f4f6;color:#6b7280;white-space:nowrap;';badges.appendChild(archiveBadge);
+                row.appendChild(badges);listEl.appendChild(row);
             });
             if(state.filtered.length>state.visibleCount){const more=document.createElement('button');more.textContent=`${chT('加载更多','Load more')} (${state.filtered.length-state.visibleCount})`;more.style.cssText='width:100%;padding:7px;border:1px solid #d1d5db;border-radius:6px;background:#fff;cursor:pointer;';more.onclick=()=>{state.visibleCount=Math.min(state.visibleCount+state.pageSize,state.filtered.length);renderList();};listEl.appendChild(more);}
         };
@@ -3005,35 +3092,38 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
             if(!window.showDirectoryPicker)throw new Error(chT('当前浏览器不支持 File System Access API。','File System Access API is unavailable.'));
             state.rootHandle=await window.showDirectoryPicker({mode:'readwrite'});updateArchiveSummary();return state.rootHandle;
         };
+        const decorateProjectKnowledge = (items, complete) => (items||[]).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':complete?'none':'unknown'}));
         const loadRemoteList = async () => {
-            state.loading=true;state.selected.clear();state.syncStatusById.clear();state.lastPlan=null;renderList();
+            state.loading=true;state.selected.clear();state.syncStatusById.clear();state.lastPlan=null;state.remoteUniverse=[];renderList();
             try{
                 if(state.mode==='team'&&!state.workspaceId){const ids=detectAllWorkspaceIds();if(ids.length===0)throw new Error(chT('未检测到 Team Workspace ID，请先打开一个团队对话后再试。','No Team Workspace ID detected. Open a team conversation first.'));state.workspaceId=ids[0];}
-                const list=state.mode==='project'?await listProjectSpaceConversations(state.workspaceId):await listConversations(state.mode==='team'?state.workspaceId:null);
-                state.list=list;state.loading=false;renderAll();
-            }catch(err){state.loading=false;state.list=[];state.filtered=[];$('conv-status').textContent=`${chT('加载失败','Load failed')}: ${err.message}`;renderList();}
+                const base=state.mode==='project'?await listProjectSpaceConversations(state.workspaceId):await listConversations(state.mode==='team'?state.workspaceId:null);
+                const universe=await chCollectPreflightRemoteUniverse(state.mode,state.workspaceId,base);
+                state.remoteUniverse=decorateProjectKnowledge(universe.remoteList,universe.complete);
+                state.remoteUniverseComplete=universe.complete;state.remoteUniverseNote=universe.note;
+                state.list=state.mode==='project'?decorateProjectKnowledge(chMergeRemoteEntries(base),universe.complete):state.remoteUniverse;
+                state.loading=false;renderAll();
+                if(state.rootHandle)await runPreflight(true);
+            }catch(err){state.loading=false;state.list=[];state.filtered=[];state.remoteUniverse=[];$('conv-status').textContent=`${chT('加载失败','Load failed')}: ${err.message}`;renderList();}
         };
-        const runPreflight = async () => {
-            const root=await ensureRoot();
+        const runPreflight = async (automatic=false) => {
+            if(!state.rootHandle)return;
+            const root=state.rootHandle;
             preflightBtn.disabled=true;
             try{
-                chSetProgress(chT('目录预检','Preflight'),chT('补全远端列表范围…','Completing remote list…'),0);
-                const remoteUniverse=await chCollectPreflightRemoteUniverse(state.mode,state.workspaceId,state.list);
-                const {plan}=await chRunPreflightPlanner({rootHandle:root,remoteList:remoteUniverse.remoteList,selectedIds:null,remoteUniverseComplete:remoteUniverse.complete,remoteUniverseNote:remoteUniverse.note});
+                chSetProgress(automatic?chT('扫描本地档案','Scanning local archive'):chT('重新扫描本地','Rescanning local'),chT('只读扫描并生成同步计划…','Read-only scan and sync planning…'),0);
+                const {plan}=await chRunPreflightPlanner({rootHandle:root,remoteList:state.remoteUniverse.length?state.remoteUniverse:state.list,selectedIds:null,remoteUniverseComplete:state.remoteUniverseComplete,remoteUniverseNote:state.remoteUniverseNote});
                 applyPreflightStatuses(plan);renderAll();
-            }catch(err){console.error('[ChatHarbor] preflight failed',err);chSetProgress(chT('目录预检失败','Preflight failed'),err?.message||String(err),100);}finally{updateControls();}
+            }catch(err){console.error('[ChatHarbor] preflight failed',err);chSetProgress(chT('本地扫描失败','Local scan failed'),err?.message||String(err),100);}finally{updateControls();}
         };
-        const runSync = async scope => {
+        const runSync = async () => {
             const root=await ensureRoot();
-            let selectedIds=null;
-            if(scope==='selected')selectedIds=new Set(state.selected);
-            else if(scope==='filtered')selectedIds=new Set(state.filtered.map(x=>x.id));
-            if(scope!=='all'&&(!selectedIds||selectedIds.size===0))return;
+            const selectedIds=new Set(state.selected);
+            if(selectedIds.size===0)return;
             try{
-                chBeginControlledRun(state.networkPolicy);renderList();chSetProgress(chT('目录同步','Directory sync'),`${chT('补全远端列表范围…','Completing remote list…')} · ${chNetworkPolicySummary(chSyncRun.policy)}`,0);
-                const remoteUniverse=await chCollectPreflightRemoteUniverse(state.mode,state.workspaceId,state.list);
-                await chControlCheckpoint('remote-universe-ready');
-                const result=await chRunIntegratedDirectorySync({rootHandle:root,remoteList:remoteUniverse.remoteList,selectedIds,workspaceId:state.workspaceId,includeAttachments:state.includeAttachments,remoteUniverseComplete:remoteUniverse.complete,remoteUniverseNote:remoteUniverse.note,networkPolicy:state.networkPolicy});
+                chBeginControlledRun(state.networkPolicy);renderList();chSetProgress(chT('目录同步','Directory sync'),`${chT('按选择范围开始流式核验与写入…','Starting streaming verify + commit…')} · ${chNetworkPolicySummary(chSyncRun.policy)}`,0);
+                const remote=state.remoteUniverse.length?state.remoteUniverse:state.list;
+                const result=await chRunIntegratedDirectorySync({rootHandle:root,remoteList:remote,selectedIds,workspaceId:state.workspaceId,includeAttachments:state.includeAttachments,remoteUniverseComplete:state.remoteUniverseComplete,remoteUniverseNote:state.remoteUniverseNote,networkPolicy:state.networkPolicy,onItemClassified:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction);renderList();},onItemCommitted:(item)=>{if(item.id&&item.finalAction)state.syncStatusById.set(item.id,item.finalAction);}});
                 applyFinalStatuses(result);renderAll();
             }catch(err){if(chIsCancellation(err))chSetProgress(chT('目录同步已取消','Sync cancelled'),chT('已在安全边界停止；已提交会话保留。','Stopped at a safe boundary; committed conversations were kept.'),100);else{console.error('[ChatHarbor] sync failed',err);chSetProgress(chT('目录同步失败','Sync failed'),err?.message||String(err),100);}}finally{chEndControlledRun();renderList();}
         };
@@ -3049,14 +3139,12 @@ single_page_picker = r'''    function showConversationPicker(options = {}) {
         startDateInput.onchange=e=>{state.startDate=e.target.value||'';applyFilters();renderList();};
         endDateInput.onchange=e=>{state.endDate=e.target.value||'';applyFilters();renderList();};
         includeAttachmentsInput.onchange=e=>{state.includeAttachments=e.target.checked;};
-        selectAllBtn.onclick=()=>{state.filtered.forEach(item=>state.selected.add(item.id));renderList();};
-        clearAllBtn.onclick=()=>{state.selected.clear();renderList();};
+        selectAllCheckbox.onchange=()=>{const allSelected=state.filtered.length>0&&state.filtered.every(item=>state.selected.has(item.id));if(allSelected){state.filtered.forEach(item=>state.selected.delete(item.id));}else{state.filtered.forEach(item=>state.selected.add(item.id));}renderList();};
+        refreshBtn.onclick=async()=>{const keep=new Set(state.selected);await loadRemoteList();for(const id of keep)if(state.list.some(item=>item.id===id))state.selected.add(id);renderList();};
         closeBtn.onclick=closeDialog;
-        chooseDirBtn.onclick=async()=>{try{state.rootHandle=null;await ensureRoot();}catch(err){if(err?.name!=='AbortError')chSetProgress(chT('选择目录失败','Directory selection failed'),err?.message||String(err),null);}};
-        preflightBtn.onclick=runPreflight;
-        syncSelectedBtn.onclick=()=>runSync('selected');
-        syncFilteredBtn.onclick=()=>runSync('filtered');
-        syncAllBtn.onclick=()=>runSync('all');
+        chooseDirBtn.onclick=async()=>{try{state.rootHandle=null;state.lastPlan=null;await ensureRoot();await runPreflight(true);}catch(err){if(err?.name!=='AbortError')chSetProgress(chT('选择目录失败','Directory selection failed'),err?.message||String(err),null);}};
+        preflightBtn.onclick=()=>runPreflight(false);
+        syncSelectedBtn.onclick=runSync;
         [speedLevelInput,batchSizeInput,pauseMinInput,pauseMaxInput].forEach(el=>el.onchange=persistPolicy);
         pauseSyncBtn.onclick=()=>{if(!chSyncRun.active)return;if(chSyncRun.paused)chResumeRun();else chRequestPause();};
         cancelSyncBtn.onclick=()=>{if(!chSyncRun.active)return;chRequestCancel('USER_CANCELLED');chSetProgress(chT('正在取消同步','Cancelling sync'),chT('不会开始新的详情请求或新的会话事务；当前原子事务会先完成。','No new detail fetch or conversation transaction will start; the current atomic transaction will finish first.'),null);};
@@ -3143,15 +3231,13 @@ preflight_report_block = r'''    function chPreflightReportText(plan) {
 
     function chShowPreflightReport(plan) {
         const s = plan.summary;
-        const verify = Math.max(0, s.maximumFetchRequired - s.newCount);
         chRenderInlineReport(
-            chT('目录预检完成','Preflight complete'),
+            chT('本地扫描完成','Local scan complete'),
             [
-                `Remote ${s.remoteUnique} · Local ${s.local}`,
-                `${chT('新增','New')} ${s.newCount} · ${chT('待核验','Verify')} ${verify} · ${chT('已同步','Synced')} ${s.unchangedCount}`,
-                `${chT('仅本地','Local only')} ${s.localOnlyReliable?s.localOnlyCount:'?'} · ${chT('异常','Errors')} ${s.duplicateIdCount+s.errorCount}`,
-                `${chT('最多详情抓取','Max detail fetch')} ${s.maximumFetchRequired}`,
-                chT('✓ 本次预检未写盘','✓ This preflight did not write to disk')
+                chT('同步状态已更新，可按筛选结果选择需要同步的对话。','Sync states are updated; select conversations using the filters.'),
+                s.errorCount || s.duplicateIdCount
+                    ? chT('发现异常，请查看详细报告后再决定是否同步。','Issues were found; review details before syncing.')
+                    : chT('✓ 只读扫描未写入对话文件或 Manifest','✓ Read-only scan did not write conversation files or the manifest')
             ],
             chPreflightReportText(plan),
             s.errorCount || s.duplicateIdCount ? 'warn' : 'success'
@@ -3215,8 +3301,7 @@ required_runtime_markers = [
     "getExportButton();",
     "document.addEventListener('DOMContentLoaded', initFab);",
     "#gpt-rescue-btn",
-    "ChatHarbor｜选择空间",
-    "选择对话 / 目录同步",
+    "showDialog: () => showConversationPicker",
     "id=\"preflight-plan-btn\"",
     "id=\"sync-directory-btn\"",
     "id=\"ch-pause-sync-btn\"",
@@ -3225,12 +3310,12 @@ required_runtime_markers = [
     "chBeginControlledRun",
     "chGetConversationConservative",
     "id=\"ch-space-select\"",
-    "id=\"sync-filtered-btn\"",
-    "id=\"sync-all-btn\"",
+    "id=\"select-all-checkbox\"",
     "id=\"ch-result-panel\"",
     "grid-template-columns:minmax(0,1fr) 310px",
     "const FAB_STORAGE_KEY = 'chatharbor-fab-v1';",
-    "showDialog: () => showConversationPicker",
+    "chReconcileRuntimeState",
+    "按选择范围开始流式核验与写入",
 ]
 missing_runtime_markers = [marker for marker in required_runtime_markers if marker not in text]
 if missing_runtime_markers:
@@ -3238,6 +3323,9 @@ if missing_runtime_markers:
 forbidden_runtime_markers = [
     "ch-integrated-sync-report-overlay",
     "ch-preflight-report-overlay",
+    "id=\"sync-filtered-btn\"",
+    "id=\"sync-all-btn\"",
+    "id=\"clear-all-btn\"",
 ]
 remaining_forbidden = [marker for marker in forbidden_runtime_markers if marker in text]
 if remaining_forbidden:

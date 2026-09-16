@@ -1,6 +1,7 @@
 const fs = require('fs');
 const assert = require('assert');
-global.document={getElementById:()=>null};
+global.document={getElementById:()=>null,addEventListener:()=>{},hidden:false};
+global.window={addEventListener:()=>{}};
 global.localStorage={getItem:()=>null,setItem:()=>{}};
 const sleep=ms=>new Promise(r=>setTimeout(r, Math.min(ms, 1)));
 function normalizeEpochSeconds(v){return Number(v)||0;}

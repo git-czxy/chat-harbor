@@ -107,7 +107,9 @@
         cancelReason: null,
         phase: 'idle',
         policy: chLoadNetworkPolicy(),
-        waiters: []
+        waiters: [],
+        sleepDeadline: null,
+        sleepPrimary: null
     };
 
     function chBeginControlledRun(policy = null) {
@@ -119,6 +121,8 @@
         chSyncRun.phase = 'starting';
         chSyncRun.policy = chSaveNetworkPolicy(policy || chLoadNetworkPolicy());
         chSyncRun.waiters = [];
+        chSyncRun.sleepDeadline = null;
+        chSyncRun.sleepPrimary = null;
         chUpdateRunControlUi();
         return chSyncRun;
     }
@@ -131,6 +135,8 @@
         chSyncRun.cancelRequested = false;
         chSyncRun.cancelReason = null;
         chSyncRun.phase = 'idle';
+        chSyncRun.sleepDeadline = null;
+        chSyncRun.sleepPrimary = null;
         chUpdateRunControlUi();
     }
 
@@ -183,18 +189,60 @@
     }
 
     async function chControlledSleep(ms, primary = '保守网络等待', secondary = '') {
-        let remaining = Math.max(0, Math.round(Number(ms) || 0));
-        while (remaining > 0) {
-            await chControlCheckpoint();
-            const chunk = Math.min(1000, remaining);
-            if (remaining >= 1000) {
-                chSetProgress(primary, secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`, null);
+        const duration = Math.max(0, Math.round(Number(ms) || 0));
+        const deadline = Date.now() + duration;
+        chSyncRun.sleepDeadline = deadline;
+        chSyncRun.sleepPrimary = primary;
+        let systemSuspended = false;
+        try {
+            while (true) {
+                await chControlCheckpoint();
+                const remaining = deadline - Date.now();
+                if (remaining <= 0) break;
+                if (remaining >= 1000) {
+                    chSetProgress(primary, secondary || `剩余约 ${Math.ceil(remaining / 1000)} 秒`, null);
+                }
+                const chunk = Math.min(1000, remaining);
+                const before = Date.now();
+                await sleep(chunk);
+                const elapsed = Date.now() - before;
+                // Browsers suspend timers during OS sleep / long background throttling.
+                // Detect elapsed wall time instead of counting timer ticks.
+                if (elapsed > chunk + 15000) systemSuspended = true;
             }
-            await sleep(chunk);
-            remaining -= chunk;
+        } finally {
+            chSyncRun.sleepDeadline = null;
+            chSyncRun.sleepPrimary = null;
+        }
+        await chControlCheckpoint();
+        if (systemSuspended && !chSyncRun.paused && !chSyncRun.cancelRequested) {
+            const guardMs = chNetworkDelayMs(chSyncRun.policy);
+            const guardDeadline = Date.now() + guardMs;
+            while (Date.now() < guardDeadline) {
+                await chControlCheckpoint('wake-guard');
+                const remaining = guardDeadline - Date.now();
+                chSetProgress('恢复保护等待', `检测到系统休眠/长时间挂起 · ${Math.max(1, Math.ceil(remaining / 1000))} 秒后继续`, null);
+                await sleep(Math.min(1000, Math.max(1, remaining)));
+            }
         }
         await chControlCheckpoint();
     }
+
+    function chReconcileRuntimeState() {
+        if (!chSyncRun.active) return;
+        chUpdateRunControlUi();
+        // Absolute deadlines are evaluated by chControlledSleep when timers resume.
+        // User pause remains authoritative and is never auto-resumed here.
+        if (chSyncRun.paused) return;
+        if (chSyncRun.sleepDeadline && Date.now() >= chSyncRun.sleepDeadline) {
+            const waiters = chSyncRun.waiters.splice(0);
+            waiters.forEach(resolve => { try { resolve(); } catch (_) {} });
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) chReconcileRuntimeState(); });
+    window.addEventListener('focus', chReconcileRuntimeState);
+    window.addEventListener('pageshow', chReconcileRuntimeState);
 
     function chErrorStatus(err) {
         if (Number.isFinite(err?.status)) return Number(err.status);
@@ -2155,7 +2203,9 @@
         includeAttachments = false,
         remoteUniverseComplete = true,
         remoteUniverseNote = null,
-        networkPolicy = null
+        networkPolicy = null,
+        onItemClassified = null,
+        onItemCommitted = null
     }) {
         const selected = selectedIds instanceof Set && selectedIds.size > 0 ? selectedIds : null;
         if (!selected && !remoteUniverseComplete) {
@@ -2175,29 +2225,16 @@
             remoteUniverseComplete,
             remoteUniverseNote
         });
-
-        chSetProgress('目录同步', `预检完成 · 最多抓取 ${plan.summary.maximumFetchRequired} 条详情`, 5);
-        let verification;
-        try {
-            verification = await chVerifyPreflightCandidates({ plan, workspaceId });
-        } catch (err) {
-            if (chIsCancellation(err)) {
-                chSetProgress('目录同步已取消', '已停止后续详情请求；尚未进入写入阶段。', 100);
-                return {
-                    localScan,
-                    plan,
-                    verification: { items: [], counts: {}, detailFetchCount: 0, cancelled: true },
-                    sync: { attempted: 0, succeeded: 0, failed: 0, manifestOnly: 0, fileCommits: 0, cleanupWarnings: [], results: [], failures: [], cancelled: true }
-                };
-            }
-            throw err;
+        const fetchTotal = plan.items.filter(item => item.needs_detail_fetch && item.action !== 'ERROR' && item.action !== 'DUPLICATE').length;
+        if (fetchTotal > 0 && !await ensureAccessToken()) {
+            throw new Error('无法获取 Access Token，无法执行 detail verification。');
         }
 
-        const actionable = verification.items.filter(item => CH_FINAL_SYNC_ACTIONS.has(item.finalAction));
         const manifest = await chReadManifest(rootHandle);
         const btn = getExportButton();
+        const verification = { items: [], counts: {}, detailFetchCount: 0, cancelled: false };
         const sync = {
-            attempted: actionable.length,
+            attempted: 0,
             succeeded: 0,
             failed: 0,
             manifestOnly: 0,
@@ -2207,65 +2244,107 @@
             failures: [],
             cancelled: false
         };
+        let fetchIndex = 0;
+        const totalItems = Math.max(1, plan.items.length);
 
-        for (let i = 0; i < actionable.length; i++) {
+        for (let i = 0; i < plan.items.length; i++) {
+            let classified = null;
+            const item = plan.items[i];
             try {
-                await chControlCheckpoint('apply-sync');
-            } catch (err) {
-                if (chIsCancellation(err)) {
-                    sync.cancelled = true;
-                    break;
+                await chControlCheckpoint('stream-sync');
+                if (!item.needs_detail_fetch || item.action === 'ERROR' || item.action === 'DUPLICATE') {
+                    classified = {
+                        ...item,
+                        finalAction: item.action,
+                        needs_sync: false,
+                        finalReasons: item.reasons || []
+                    };
+                } else {
+                    const title = item.remote?.title || item.local?.title || item.id;
+                    chSetProgress(
+                        '核验并同步',
+                        `${fetchIndex + 1}/${fetchTotal} · ${String(title).slice(0, 58)}`,
+                        Math.min(98, Math.round((i / totalItems) * 98))
+                    );
+                    try {
+                        const convData = await chGetConversationConservative(item.id, workspaceId);
+                        verification.detailFetchCount++;
+                        fetchIndex++;
+                        classified = await chClassifyFetchedConversation(item, convData);
+                    } catch (err) {
+                        if (chIsCancellation(err)) throw err;
+                        verification.detailFetchCount++;
+                        fetchIndex++;
+                        classified = {
+                            ...item,
+                            finalAction: 'ERROR',
+                            needs_sync: false,
+                            finalReasons: ['DETAIL_FETCH_OR_CLASSIFICATION_FAILED'],
+                            error: err?.message || String(err)
+                        };
+                    }
                 }
-                throw err;
-            }
-            const item = actionable[i];
-            const title = item.convData?.title || item.remote?.title || item.id;
-            chSetProgress(
-                '应用同步计划',
-                `${i + 1}/${actionable.length} · [${item.finalAction}] ${String(title).slice(0, 54)}`,
-                50 + (actionable.length ? Math.round((i / actionable.length) * 48) : 48)
-            );
-            try {
-                const applied = await chApplyClassifiedSyncItem({
-                    rootHandle,
-                    classifiedItem: item,
-                    manifest,
-                    workspaceId,
-                    includeAttachments,
-                    btn,
-                    conversationIndex: i,
-                    conversationTotal: actionable.length || 1
-                });
-                sync.succeeded++;
-                if (applied.mode === 'MANIFEST_ONLY') sync.manifestOnly++;
-                if (applied.mode === 'FILES_AND_MANIFEST') sync.fileCommits++;
-                sync.cleanupWarnings.push(...(applied.cleanup?.warnings || []).map(w => `${item.id}: ${w}`));
-                sync.results.push(applied);
-                if (includeAttachments && applied?.record?.attachment_detected > 0 && i < actionable.length - 1) {
+
+                verification.items.push(classified);
+                verification.counts[classified.finalAction] = (verification.counts[classified.finalAction] || 0) + 1;
+                if (typeof onItemClassified === 'function') {
+                    try { onItemClassified(classified, { processed: i + 1, total: plan.items.length }); } catch (_) {}
+                }
+
+                if (CH_FINAL_SYNC_ACTIONS.has(classified.finalAction)) {
+                    sync.attempted++;
+                    try {
+                        const applied = await chApplyClassifiedSyncItem({
+                            rootHandle,
+                            classifiedItem: classified,
+                            manifest,
+                            workspaceId,
+                            includeAttachments,
+                            btn,
+                            conversationIndex: i,
+                            conversationTotal: totalItems
+                        });
+                        sync.succeeded++;
+                        if (applied.mode === 'MANIFEST_ONLY') sync.manifestOnly++;
+                        if (applied.mode === 'FILES_AND_MANIFEST') sync.fileCommits++;
+                        sync.cleanupWarnings.push(...(applied.cleanup?.warnings || []).map(w => `${classified.id}: ${w}`));
+                        sync.results.push(applied);
+                        if (typeof onItemCommitted === 'function') {
+                            try { onItemCommitted(classified, applied); } catch (_) {}
+                        }
+                    } catch (err) {
+                        if (chIsCancellation(err)) throw err;
+                        sync.failed++;
+                        sync.failures.push({
+                            id: classified.id,
+                            action: classified.finalAction,
+                            error: err?.message || String(err)
+                        });
+                    }
+                }
+
+                // One conservative network cadence governs the next detail request.  This runs
+                // after the current conversation has been fully classified and atomically committed.
+                if (item.needs_detail_fetch && fetchIndex < fetchTotal) {
                     const policy = chNormalizeNetworkPolicy(chSyncRun.policy);
-                    const completed = i + 1;
-                    if (completed % policy.batchSize === 0) {
+                    if (fetchIndex % policy.batchSize === 0) {
                         const pauseMs = chNetworkBatchPauseMs(policy);
                         await chControlledSleep(
                             pauseMs,
-                            '附件同步批次暂停',
-                            `已完成 ${completed}/${actionable.length} 个会话 · 暂停约 ${Math.round(pauseMs / 1000)} 秒`
+                            '保守批次暂停',
+                            `已处理 ${fetchIndex}/${fetchTotal} 个远端详情 · 下一批前暂停约 ${Math.round(pauseMs / 1000)} 秒`
                         );
                     } else {
-                        await chControlledSleep(chNetworkDelayMs(policy), '附件同步请求间隔', `${completed}/${actionable.length}`);
+                        await chControlledSleep(chNetworkDelayMs(policy), '请求间隔', `已处理 ${fetchIndex}/${fetchTotal} 个远端详情`);
                     }
                 }
             } catch (err) {
                 if (chIsCancellation(err)) {
+                    verification.cancelled = true;
                     sync.cancelled = true;
                     break;
                 }
-                sync.failed++;
-                sync.failures.push({
-                    id: item.id,
-                    action: item.finalAction,
-                    error: err?.message || String(err)
-                });
+                throw err;
             }
         }
 
@@ -2273,7 +2352,7 @@
             sync.cancelled ? '目录同步已取消' : (sync.failed ? '目录同步完成（存在失败）' : '目录同步完成'),
             sync.cancelled
                 ? `已安全提交 ${sync.succeeded} 个会话；未开始的会话保持不变，下次可继续。`
-                : `成功 ${sync.succeeded}/${sync.attempted} · 未变化 ${verification.counts.UNCHANGED || 0} · 异常 ${(verification.counts.ERROR || 0) + (verification.counts.DUPLICATE || 0)}`,
+                : `写入成功 ${sync.succeeded} · 未变化 ${verification.counts.UNCHANGED || 0} · 异常 ${(verification.counts.ERROR || 0) + (verification.counts.DUPLICATE || 0)}`,
             100
         );
 
@@ -2282,4 +2361,5 @@
         console.log('[ChatHarbor Integrated Sync]', result);
         return result;
     }
+
 

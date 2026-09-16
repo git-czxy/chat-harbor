@@ -18,38 +18,32 @@
     "non-blocking 100% progress"
   ],
   "integrated_stage_scope": [
-    "read-only local archive scan",
-    "preflight planner",
-    "remote list universe completion and canonical-ID merge",
+    "read-only local archive scan + automatic Plan after directory selection",
+    "canonical remote universe shared by workspace UI and Planner",
+    "project membership known / none / unknown distinction",
     "candidate-only detail fetch",
+    "streaming Fetch -> Classify -> Atomic Sync -> Manifest per conversation",
     "content-signature final verification",
-    "NEW",
-    "UNCHANGED",
-    "UPDATED",
-    "RENAMED_ONLY",
-    "UPDATED_AND_RENAMED",
-    "METADATA_ONLY",
+    "NEW / UPDATED / RENAMED_ONLY / UPDATED_AND_RENAMED / METADATA_ONLY / UNCHANGED",
     "LOCAL_ONLY protection",
     "DUPLICATE / ERROR blocking",
     "LOCAL_UNTRACKED conservative adoption",
-    "selective sync using the existing picker checkboxes",
-    "full sync when no checkbox is selected",
+    "single selection-based sync scope",
+    "three-state select-all over complete filtered results",
     "write -> verify -> manifest commit -> tracked-only cleanup ordering",
     "conservative network policy with six speed levels",
-    "20-item default detail-fetch batching with randomized inter-batch pause",
+    "20-item default detail-fetch batching with randomized 180-300s inter-batch pause",
     "retry policy for retryable detail-fetch errors",
     "cooperative pause / resume / safe cancellation controls",
-    "active-run navigation guard",
+    "absolute wall-clock wait deadlines with sleep/wake reconciliation",
+    "wake guard jitter before resumed network activity",
     "Desktop-first single-page workspace UI",
     "responsive 1240px-class wide layout with independent conversation-list scrolling",
-    "right-rail local archive / network policy / sync content / primary actions",
-    "green persisted right-edge half-hidden launcher with new ChatHarbor storage key",
-    "single-window space switching (personal/project/team)",
-    "project/archive/sync-status/time filters in compact toolbar",
-    "Shift+click range selection with selection preserved across filtering",
-    "inline Chinese/English preflight and sync summaries with copyable detailed report",
-    "progress / pause / cancel moved into right rail instead of list area",
-    "primary launcher opens workspace directly instead of the legacy space chooser"
+    "archive state pill beside sync state pill",
+    "automatic local rescan planning and manual Rescan local action",
+    "manual remote Refresh preserving still-valid selections",
+    "green persisted right-edge half-hidden launcher",
+    "zh-CN / en-US ChatHarbor-owned UI and inline reports"
   ],
   "explicitly_not_in_this_stage": [
     "full localization of every inherited upstream string outside ChatHarbor-owned UI",
@@ -62,7 +56,7 @@
     "local_only_auto_delete": false,
     "untracked_legacy_asset_auto_delete": false
   },
-  "integrated_build_version": "0.0.8.0",
+  "integrated_build_version": "0.0.9.0",
   "runtime_control": {
     "default_speed": "6000ms base + 0-4000ms jitter",
     "default_batch_size": 20,
@@ -70,21 +64,23 @@
       180,
       300
     ],
-    "pause_semantics": "finish in-flight request, then no new detail request or conversation transaction",
-    "cancel_semantics": "stop at safe boundary; completed per-conversation commits remain authoritative"
+    "pause_semantics": "explicit user pause never auto-resumes; no new detail request or conversation transaction begins while paused",
+    "cancel_semantics": "stop at safe boundary; completed per-conversation commits remain authoritative",
+    "sleep_semantics": "conservative waits use absolute Date.now() deadlines; elapsed OS sleep counts; wake adds normal request jitter"
   },
   "ui": {
     "layout": "Desktop-first single-page workspace",
     "width": "min(1240px, calc(100vw - 48px))",
     "height": "min(820px, calc(100vh - 48px))",
     "launcher": "44px green, right-edge default at 45% viewport height, half-hidden when idle, position persisted",
-    "reporting": "inline right-rail summary; no dedicated report modal",
+    "reporting": "inline right-rail summary; copyable detailed report; no dedicated report modal",
+    "selection": "single explicit selected conversation-id set; tri-state select-all applies to full filtered result",
     "primary_actions": [
-      "sync selected",
-      "sync filtered",
-      "sync all"
+      "sync selected"
     ],
+    "archive_filter_default": "all",
+    "directory_flow": "remote ready -> choose directory -> automatic read-only scan/Plan; manual Rescan local available",
     "legacy_space_chooser_primary_entry": false
   },
-  "core_literal_sha256": "f4c01a1e3c2f94e3572fe76d1263f0c4ab3ea29a3c64b121482b6b2eab6122cc"
+  "core_literal_sha256": "8fa829172f4ac6e48c0c05c80d67df4cfe13168029f82d76d5b3aaffa55cf9ae"
 }

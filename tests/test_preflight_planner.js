@@ -17,7 +17,8 @@ let mockProjectList = [];
 let mockRootList = [];
 async function listProjectSpaceConversations(){ return mockProjectList; }
 async function listConversations(){ return mockRootList; }
-global.document={getElementById:()=>null};
+global.document={getElementById:()=>null,addEventListener:()=>{},hidden:false};
+global.window={addEventListener:()=>{}};
 global.localStorage={getItem:()=>null,setItem:()=>{}};
 const snippet = fs.readFileSync(require('path').join(__dirname,'integrated_sync_layer.js'),'utf8');
 eval(snippet);
