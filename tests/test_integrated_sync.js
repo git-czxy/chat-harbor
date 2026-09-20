@@ -212,6 +212,17 @@ chShowIntegratedSyncReport = ()=>{};
 
   const legacyPartial={...legacyComplete,attachment_detected:2,attachment_downloaded:1,attachment_failed:1};
   assert.strictEqual(chRecordAttachmentState(legacyPartial),'partial');
+  const knownPartial={...legacyPartial,attachment_failures:[{kind:'file',file_id:'file-b',name:'b.pdf',error:'HTTP 404'}]};
+  const knownPartialPlan=chBuildPreflightPlan([{id:'X',title:'T',update_time:101,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'}],{...scanObs,recordsById:new Map([['X',knownPartial]])},null,{includeAttachments:true,retryFailedAttachments:false});
+  assert.strictEqual(knownPartialPlan.items[0].action,'UNCHANGED');
+  assert.strictEqual(knownPartialPlan.summary.attachmentCandidateCount,0);
+  const retryPartialPlan=chBuildPreflightPlan([{id:'X',title:'T',update_time:101,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'}],{...scanObs,recordsById:new Map([['X',knownPartial]])},null,{includeAttachments:true,retryFailedAttachments:true});
+  assert.strictEqual(retryPartialPlan.items[0].action,'VERIFY_CHANGED');
+  assert.strictEqual(retryPartialPlan.summary.attachmentCandidateCount,1);
+  // A remote update still fetches detail, while the attachment ledger itself controls retries.
+  const updatedKnownPlan=chBuildPreflightPlan([{id:'X',title:'T',update_time:102,is_archived:false,projectId:null,projectTitle:null,__chProjectState:'none',__chArchiveState:'known'}],{...scanObs,recordsById:new Map([['X',knownPartial]])},null,{includeAttachments:true,retryFailedAttachments:false});
+  assert.strictEqual(updatedKnownPlan.items[0].needs_detail_fetch,true);
+  assert.strictEqual(updatedKnownPlan.items[0].attachment_candidate,false);
   const legacyZero={...legacyComplete,attachment_detected:0,attachment_downloaded:0,attachment_failed:0,assets:[]};
   delete legacyZero.attachments_checked_at;
   assert.strictEqual(chRecordAttachmentState(legacyZero),'unknown');
@@ -254,6 +265,30 @@ chShowIntegratedSyncReport = ()=>{};
   assert.deepStrictEqual(progressCounts,[2,3]);
   assert(progressCounts.every((value,index)=>index===0 || value>=progressCounts[index-1]));
 
+  // Known failures are preserved but not retried by default; retry runs replace only the
+  // entries actually retried, so ledger count always equals current failures.
+  const failedBackfill={...existingBackfill,attachment_detected:3,attachment_downloaded:2,attachment_failed:1,attachment_failures:[{kind:'file',file_id:'file-b',name:'b.pdf',error:'HTTP 404'}]};
+  collectVisibleAttachments=()=>[
+    {kind:'file',fileId:'file-a',messageId:'m1',ownerRole:'user',name:'a.pdf',isImage:false},
+    {kind:'file',fileId:'file-b',messageId:'m2',ownerRole:'user',name:'b.pdf',isImage:false},
+    {kind:'file',fileId:'file-c',messageId:'m3',ownerRole:'user',name:'c.pdf',isImage:false},
+    {kind:'file',fileId:'file-new',messageId:'m4',ownerRole:'user',name:'new.pdf',isImage:false}
+  ];
+  const noRetryFetch=[];
+  const noRetry=await chWriteAttachmentsToDirectory({getDirectoryHandle:async()=>({})},{conversation_id:'X',title:'T'},null,null,{targetPrefix:'conversations/',existingRecord:failedBackfill,fetchAttachmentBinary:async(ref)=>{noRetryFetch.push(ref.fileId);return {filename:`${ref.fileId}.pdf`,data:new Uint8Array([1])};},writeAttachment:async()=>{}});
+  assert.deepStrictEqual(noRetryFetch,['file-new']);
+  assert.strictEqual(noRetry.failures.length,1);
+  assert.strictEqual(noRetry.failures[0].file_id,'file-b');
+  const retryFetch=[];
+  const retry=await chWriteAttachmentsToDirectory({getDirectoryHandle:async()=>({})},{conversation_id:'X',title:'T'},null,null,{targetPrefix:'conversations/',existingRecord:failedBackfill,retryFailedAttachments:true,fetchAttachmentBinary:async(ref)=>{retryFetch.push(ref.fileId);if(ref.fileId==='file-b')throw new Error('still missing');return {filename:`${ref.fileId}.pdf`,data:new Uint8Array([1])};},writeAttachment:async()=>{}});
+  assert.deepStrictEqual(retryFetch,['file-b','file-new']);
+  assert.strictEqual(retry.failures.length,1);
+  assert.strictEqual(retry.failures[0].file_id,'file-b');
+  const allRecovered=await chWriteAttachmentsToDirectory({getDirectoryHandle:async()=>({})},{conversation_id:'X',title:'T'},null,null,{targetPrefix:'conversations/',existingRecord:failedBackfill,retryFailedAttachments:true,fetchAttachmentBinary:async(ref)=>({filename:`${ref.fileId}.pdf`,data:new Uint8Array([1])}),writeAttachment:async()=>{}});
+  assert.strictEqual(allRecovered.failures.length,0);
+  assert.strictEqual(allRecovered.files.length,4);
+  collectVisibleAttachments=originalCollect;
+
 
   // Cleanup removes only old manifest-tracked files and never recursively deletes legacy-untracked assets.
   class FakeEntryFile { constructor(){ this.kind='file'; } }
@@ -287,6 +322,7 @@ chShowIntegratedSyncReport = ()=>{};
   assert.strictEqual(oldAssetsDir.entriesMap.has('legacy-untracked.bin'),true);
   assert.strictEqual(cleanupRoot.entriesMap.has('Old_X_files'),true);
 
+  const projectPlanner=chBuildPreflightPlan;
   // Full sync refuses an incomplete remote universe before any disk scan/write.
   await assert.rejects(
     ()=>chRunIntegratedDirectorySync({rootHandle:{},remoteList:[],selectedIds:null,remoteUniverseComplete:false}),
@@ -335,6 +371,52 @@ chShowIntegratedSyncReport = ()=>{};
   assert.strictEqual(skipResult.verification.detailFetchCount,1);
   chEndControlledRun();
 
+  // Unresolved account identity is valid for personal/default requests: it must still
+  // retrieve the project complement and never certify unknown membership as NONE.
+  const savedResolve=global.resolveWorkspaceId, savedProjects=global.getProjectSpaces, savedHeaders=chRemoteHeaders, savedFetch=global.fetch, savedRootFull=chFetchRootFull;
+  global.PROJECT_SIDEBAR_PREVIEW=20;
+  const projectItems=Array.from({length:145},(_,i)=>({id:`P${i}`,title:`P${i}`,update_time:100}));
+  const projects=Array.from({length:9},(_,i)=>({id:`project-${i}`,title:`Project ${i}`,conversations:[]}));
+  let projectCalls=[];
+  global.resolveWorkspaceId=()=>null;
+  chRemoteHeaders=async()=>({});
+  global.getProjectSpaces=async workspaceId=>{projectCalls.push(workspaceId);return projects;};
+  global.fetch=async url=>{
+    const projectMatch=String(url).match(/gizmos\/project-(\d+)\/conversations/);
+    if(!projectMatch)throw new Error(`unexpected URL ${url}`);
+    const index=Number(projectMatch[1]);
+    const items=projectItems.filter((_,n)=>n%9===index);
+    return {ok:true,json:async()=>({items,cursor:null})};
+  };
+  const fullProjects=await chFetchProjectFull(null);
+  assert.strictEqual(fullProjects.length,145);
+  assert.deepStrictEqual(projectCalls,[null]);
+  projects.forEach((project,index)=>project.conversations=[projectItems[index]]);
+  const headProjects=await chFetchProjectHead(null,20);
+  assert.strictEqual(headProjects.length,9);
+  assert(projectCalls.every(value=>value===null));
+
+  chFetchRootFull=async()=>Array.from({length:401},(_,i)=>({id:`P${i}`,title:`P${i}`,update_time:100,is_archived:false,projectId:null,projectTitle:null,__chArchiveState:'known',__chProjectState:'unknown'}));
+  global.getProjectSpaces=async()=>{throw new Error('project API failed');};
+  const projectFailure=await chFetchFullRemoteUniverse(null);
+  assert.strictEqual(projectFailure.complete,false);
+  assert(projectFailure.list.every(item=>item.__chProjectState==='unknown'));
+
+  global.getProjectSpaces=async()=>[{id:'broken',title:'Broken',conversations:[]}];
+  global.fetch=async()=>({ok:false,status:500});
+  const paginationFailure=await chFetchFullRemoteUniverse(null);
+  assert.strictEqual(paginationFailure.complete,false);
+  assert(paginationFailure.list.every(item=>item.__chProjectState==='unknown'));
+
+  const truth=chMergeRemoteEntries(chFetchRootFull ? await chFetchRootFull(null) : []).map((item,index)=>index<145?{...item,projectId:`project-${index%9}`,projectTitle:`Project ${index%9}`,__chProjectState:'known'}:item);
+  const truthLocal=new Map(truth.map(item=>[item.id,{conversation_id:item.id,title:item.title,remote_update_time:100,tracking:'manifest',content_signature:'same',is_archived:false,project_id:item.projectId,project_title:item.projectTitle,remote_list_update_time:100,remote_list_title:item.title,remote_list_is_archived:false,remote_list_project_id:item.projectId,remote_list_project_title:item.projectTitle}]));
+  const truthScan={recordsById:truthLocal,duplicateIds:new Set(),duplicates:[],blockedIds:new Set(),errors:[],errorsById:new Map(),stats:{manifestTracked:401,manifestProject:145,manifestRoot:256,archiveLayoutVersion:2,provider:'chatgpt',migrationRequired:false,rawConversationFiles:0,rawOnlyIds:0}};
+  assert.strictEqual(projectPlanner(truth,truthScan).summary.metadataCandidateCount||0,0);
+  const smoked=truthLocal.get('P0'); smoked.project_id=null; smoked.project_title=null; smoked.remote_list_project_id=null; smoked.remote_list_project_title=null;
+  const recoveryPlan=projectPlanner(truth,truthScan);
+  if(recoveryPlan.summary.metadataCandidateCount!==1)throw new Error(JSON.stringify({summary:recoveryPlan.summary,p0:recoveryPlan.items.find(item=>item.id==='P0')}));
+  global.resolveWorkspaceId=savedResolve; global.getProjectSpaces=savedProjects; chRemoteHeaders=savedHeaders; global.fetch=savedFetch; chFetchRootFull=savedRootFull;
+
   console.log('PASS final classification matrix');
   console.log('PASS canonical remote-universe merge + ambiguity preservation');
   console.log('PASS remote-head stable fingerprint / change detection');
@@ -349,4 +431,7 @@ chShowIntegratedSyncReport = ()=>{};
   console.log('PASS incomplete full-sync stop condition');
   console.log('PASS streaming fetch -> classify -> atomic commit ordering');
   console.log('PASS preflight-confirmed items skip the runtime work queue');
+  console.log('PASS unresolved account identity still retrieves project complement');
+  console.log('PASS project API/pagination failures remain incomplete and project-state unknown');
+  console.log('PASS 401/145 project truth has zero metadata diffs and one Smoke recovery diff');
 })().catch(e=>{console.error(e);process.exit(1);});

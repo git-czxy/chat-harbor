@@ -897,6 +897,29 @@
         return { references, retained, missing };
     }
 
+    function chAttachmentFailureKey(failure) {
+        if (!failure) return '';
+        return failure.kind === 'sandbox'
+            ? `sandbox:${failure.message_id || ''}:${failure.sandbox_path || ''}`
+            : `file:${failure.file_id || ''}`;
+    }
+
+    function chCurrentAttachmentFailures(references, record) {
+        const activeKeys = new Set(references.map(chAttachmentReferenceKey).filter(Boolean));
+        return (Array.isArray(record?.attachment_failures) ? record.attachment_failures : [])
+            .filter(failure => activeKeys.has(chAttachmentFailureKey(failure)));
+    }
+
+    function chAttachmentNeedsAction(record, retryFailedAttachments = false) {
+        const state = chRecordAttachmentState(record);
+        if (state === 'complete' || state === 'none') return false;
+        if (state === 'unknown' || state === 'not_downloaded') return true;
+        const failures = Array.isArray(record?.attachment_failures) ? record.attachment_failures : [];
+        const detected = Number(record?.attachment_detected || 0);
+        const downloaded = Number(record?.attachment_downloaded || 0);
+        return Boolean(retryFailedAttachments) || detected > downloaded + failures.length;
+    }
+
     function chExistingAssetAsDownloadedFile(asset, targetPrefix) {
         const relativeLink = chRelativeMarkdownPath(targetPrefix, asset?.path || '');
         return {
@@ -951,7 +974,7 @@
         }
 
         const folderName = generateUniqueFilename(convData).replace(/\.json$/i, '') + '_files';
-        const missingRefs = [...backfillPlan.missing];
+        let missingRefs = [...backfillPlan.missing];
         const verifiedRetained = [];
         for (const item of backfillPlan.retained) {
             let reusable = true;
@@ -963,6 +986,16 @@
             if (reusable) verifiedRetained.push(item);
             else missingRefs.push(item.reference);
         }
+        const currentFailures = chCurrentAttachmentFailures(references, existingRecord);
+        const failedKeys = new Set(currentFailures.map(chAttachmentFailureKey).filter(Boolean));
+        const retryFailedAttachments = Boolean(options.retryFailedAttachments);
+        const attemptedKeys = new Set();
+        missingRefs = missingRefs.filter(reference => {
+            const key = chAttachmentReferenceKey(reference);
+            const attempt = retryFailedAttachments || !failedKeys.has(key);
+            if (attempt) attemptedKeys.add(key);
+            return attempt;
+        });
         const assetDir = missingRefs.length > 0
             ? await targetDir.getDirectoryHandle(folderName, { create: true })
             : null;
@@ -1054,10 +1087,11 @@
             ? `${targetPrefix}${folderName}`
             : (existingRecord?.asset_dir || (files[0]?.root_path ? chPathDirname(files[0].root_path) : null));
 
+        const retainedFailures = currentFailures.filter(failure => !attemptedKeys.has(chAttachmentFailureKey(failure)));
         return {
             detected: references.length,
             files,
-            failures,
+            failures: retainedFailures.concat(failures),
             sandboxPaths,
             folderName,
             assetDirPath: primaryAssetDir,
@@ -1820,6 +1854,7 @@
         const remoteUniverseComplete = options.remoteUniverseComplete !== false;
         const remoteUniverseNote = options.remoteUniverseNote || null;
         const includeAttachments = Boolean(options.includeAttachments);
+        const retryFailedAttachments = Boolean(options.retryFailedAttachments);
         const selected = selectedIds instanceof Set && selectedIds.size > 0 ? selectedIds : null;
 
         const remoteById = new Map(); const remoteErrors=[];
@@ -1860,7 +1895,7 @@
             if(projectKnown && String(remote?.projectTitle??'')!==String(chRecordListProjectTitle(local)??'')) metadataReasons.push('PROJECT_TITLE_DIFF');
             const metadataCandidate=metadataReasons.length>0;
             const attachmentState=chRecordAttachmentState(local);
-            const attachmentCandidate=includeAttachments && !['complete','none'].includes(attachmentState);
+            const attachmentCandidate=includeAttachments && chAttachmentNeedsAction(local, retryFailedAttachments);
 
             if(updateCandidate)remoteUpdateCandidateCount++; if(titleChanged)renameCandidateCount++; if(metadataCandidate)metadataCandidateCount++; if(attachmentCandidate)attachmentCandidateCount++;
             if(updateCandidate||titleChanged||metadataCandidate||attachmentCandidate){
@@ -2159,7 +2194,7 @@
     }
 
     async function chFetchProjectHead(workspaceId = null, limit = CH_REMOTE_HEAD_LIMIT, options = {}) {
-        const resolved=resolveWorkspaceId(workspaceId); if(!resolved)return [];
+        const resolved=resolveWorkspaceId(workspaceId);
         options.onProgress?.({stage:'head-project',message:'快速核对项目列表…'});
         const projects=await getProjectSpaces(resolved,{conversationsPerGizmo:limit,ownedOnly:true}); const entries=[];
         for(const project of projects)for(const item of project.conversations||[])entries.push({id:item.id,title:item.title||'Untitled Conversation',create_time:normalizeEpochSeconds(item.create_time||0),update_time:normalizeEpochSeconds(item.update_time||item.create_time||0),is_archived:item.is_archived??false,projectId:project.id,projectTitle:project.title,__chArchiveState:Object.prototype.hasOwnProperty.call(item||{},'is_archived')?'known':'unknown',__chProjectState:'known',__chSourceKey:`project:${project.id}`});
@@ -2190,7 +2225,7 @@
     }
 
     async function chFetchProjectFull(workspaceId = null, options = {}) {
-        const resolved=resolveWorkspaceId(workspaceId); if(!resolved)return [];
+        const resolved=resolveWorkspaceId(workspaceId);
         const headers=await chRemoteHeaders(resolved);
         options.onProgress?.({stage:'projects',message:'读取项目列表…'});
         const projects=await getProjectSpaces(resolved,{conversationsPerGizmo:PROJECT_SIDEBAR_PREVIEW,ownedOnly:true});
@@ -2214,6 +2249,7 @@
             }while(cursor);
             options.onProjectPartial?.(entries.slice(),{current:projectIndex+1,total:projects.length,project});
         }
+        options.onProjectSummary?.({projects:projects.length,projectConversations:entries.length,accountIdentityResolved:Boolean(resolved)});
         return chMergeRemoteEntries(entries);
     }
 
@@ -2223,18 +2259,19 @@
             onPartial:partial=>options.onPartial?.(partial)
         });
         options.onPartial?.({list:rootList,complete:false,note:`root complete ${rootList.length} · project complement pending`,validatedAt:0,refreshMode:'partial-root-complete'});
-        let projectList=[]; let complete=true; let note=null;
+        let projectList=[]; let complete=true; let note=null; let projectSummary={projects:0,projectConversations:0,accountIdentityResolved:Boolean(resolveWorkspaceId(workspaceId))};
         try{
             projectList=await chFetchProjectFull(workspaceId,{
                 onProgress:options.onProgress,
                 onProjectPartial:(partialProjects,meta)=>{
                     const merged=chMergeRemoteEntries(rootList.concat(partialProjects)).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':'unknown',__chArchiveState:item.__chArchiveState||'unknown'}));
                     options.onPartial?.({list:merged,complete:false,note:`root ${rootList.length} · projects ${meta.current}/${meta.total}`,validatedAt:0,refreshMode:'partial-projects'});
-                }
+                },
+                onProjectSummary:summary=>{projectSummary=summary;}
             });
         }catch(err){complete=false;note=`project complement failed: ${err?.message||String(err)}`;}
         const merged=chMergeRemoteEntries(rootList.concat(projectList)).map(item=>({...item,__chProjectState:(item.projectId||item.projectTitle)?'known':complete?'none':'unknown',__chArchiveState:item.__chArchiveState||'unknown'}));
-        return {list:merged,complete,note:note||`full remote index ${merged.length}`};
+        return {list:merged,complete,note:note||`root=${rootList.length} · projects=${projectSummary.projects} · projectConversations=${projectSummary.projectConversations} · accountIdentityResolved=${projectSummary.accountIdentityResolved?'yes':'no'}`};
     }
 
     async function chRefreshRemoteIndex(workspaceId = null, { forceFull = false, onProgress = null, onPartial = null } = {}) {
@@ -2627,6 +2664,7 @@
 
     async function chClassifyFetchedConversation(preflightItem, convData, options = {}) {
         const includeAttachments=Boolean(options.includeAttachments);
+        const retryFailedAttachments=Boolean(options.retryFailedAttachments);
         const remote=preflightItem?.remote||{}; const local=preflightItem?.local||null;
         const id=chGetConversationId(remote,convData); const detailTitle=String(convData?.title||remote?.title||'');
         const remoteUpdateTime=convData?.update_time??remote?.update_time??null; const newSignature=await chContentSignature(convData);
@@ -2640,7 +2678,7 @@
         const titleChanged=detailTitle!==String(local?.title||'');
         const metadataReasons=chFinalMetadataDiffs(remote,local); const metadataChanged=metadataReasons.length>0;
         const timestampChanged=chTimeRelation(remoteUpdateTime,local?.remote_update_time)==='different';
-        const attachmentBackfill=includeAttachments&&!['complete','none'].includes(attachmentInspection.state);
+        const attachmentBackfill=includeAttachments&&chAttachmentNeedsAction(local,retryFailedAttachments);
         let finalAction='OBSERVATION_ONLY';
         if(contentChanged&&titleChanged)finalAction='UPDATED_AND_RENAMED';
         else if(contentChanged)finalAction='UPDATED';

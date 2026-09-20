@@ -1,5 +1,47 @@
 # ChatHarbor Changelog
 
+## 0.0.14.5 — 2026-09-20 — Released / 正式发布
+
+### 中文
+- 首个正式公开发布版；产品定位收敛为“本地优先的 ChatGPT 对话归档与完整性审计”。
+- 新增附件来源 provenance：用户上传、ChatGPT 生成交付文件、生成媒体、assistant asset、unknown。
+- 新增会话级“附件 N 未归档”提示、附件完整性筛选、紧凑失败附件详情与原会话导航。
+- 新增 403 / 404 / 415 / 500 / URL 失效解释层；原始错误继续作为事实证据保留。
+- 合入 0.0.14.4 的可审计 `SYNC_COMPLETION` / `LOCAL_PREFLIGHT` 报告，并区分当轮结果与历史累计状态。
+- 提供独立历史 provenance Backfill / Migration Tool；默认 Dry Run，不进入日常同步 Core。
+- 清理 Userscript 产品身份、上游 metadata、旧 changelog 注释与旧 Chrome 扩展桥接；保留必要 attribution。
+- 增加附件详情表头和项目轻量标签；四个主状态保持不变。
+
+### English
+- First formal public release; product position converged on a local-first ChatGPT archive and integrity-audit tool.
+- Added attachment provenance: user upload, ChatGPT-generated deliverable, generated media, assistant asset, and unknown.
+- Added conversation-level unarchived-attachment hints, integrity filtering, compact failure details, and original-conversation navigation.
+- Added explanations for 403 / 404 / 415 / 500 / expired URLs while retaining raw errors as factual evidence.
+- Integrated 0.0.14.4 auditable `SYNC_COMPLETION` / `LOCAL_PREFLIGHT` reports with per-run vs cumulative separation.
+- Added a standalone historical provenance Backfill / Migration Tool; Dry Run by default and intentionally outside the daily sync Core.
+- Cleaned userscript product identity, inherited metadata/changelog noise, and obsolete Chrome-extension bridge while preserving required attribution.
+- Added attachment-detail column headers and lightweight project chips; the four primary user states remain unchanged.
+
+## 0.0.14.4 — 2026-09-20 — Validated development milestone / 已验证开发里程碑
+
+- Added auditable run timestamps, report type/stage, attachment policy, per-run attachment counts, raw failure aggregation, and cumulative integrity summaries.
+- `LOCAL_PREFLIGHT` does not fabricate download attempts; `SYNC_COMPLETION` reports only current-run failure details.
+- Not separately published as a GitHub Release; capabilities were consolidated into v0.0.14.5.
+
+## 0.0.14.3 — 2026-09-17 — Validated development milestone / 已验证开发里程碑
+
+- Fixed Remote Project complement behavior when account identity could not be resolved.
+- Added known-failure attachment retry governance; known failures are not retried by default.
+- Added post-sync local reconciliation and preserved project truth / attachment-state boundaries.
+- Not separately published as a GitHub Release; capabilities were consolidated into v0.0.14.5.
+
+## 0.0.14.2 — 2026-09-16 — Validated development milestone / 已验证开发里程碑
+
+- Tightened user-facing state accuracy and separated classification from successful commit state.
+- Reinforced the four-state model: 已同步 / 待同步 / 需确认 / 异常.
+- Clarified local/remote state semantics without changing transactional safety.
+- Not separately published as a GitHub Release; capabilities were consolidated into v0.0.14.5.
+
 ## 0.0.14.1 — 2026-09-16
 
 ### First-use guidance
@@ -292,12 +334,3 @@ Before the integrated series, the clean-lineage reconstruction validated:
 - `conversation_id` Manifest identity;
 - attachment preservation when attachment downloading is later disabled;
 - non-blocking completion progress.
-
-## 0.0.13.0 — Lane-aware Discovery Recovery
-
-- Fixed 0.0.12.0 startup regression where list/project discovery inherited the full conservative conversation-detail delay.
-- Split backend scheduling into discovery, detail and attachment-metadata lanes while retaining one global HTTP 429 cooldown.
-- Added progressive root/project remote-index display and progress reporting.
-- Added recoverable incomplete Remote Index cache; incomplete snapshots never prove LOCAL_ONLY and cannot start write sync.
-- Exposed non-sync request/cooldown waits in loading status.
-- Preserved 0.0.12.0 commit accuracy, physical asset validation, attachment rollback and active-run snapshot freeze.

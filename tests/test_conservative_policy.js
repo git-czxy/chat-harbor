@@ -40,9 +40,9 @@ eval(layer);
   await assert.rejects(()=>chControlCheckpoint('test-cancel'), e=>e && e.code==='CHATHARBOR_CANCELLED');
   chEndControlledRun();
 
-  const patcher=fs.readFileSync(require('path').join(__dirname,'..','ChatHarbor_IntegratedSync_patch.py'),'utf8');
+  const runtime=fs.readFileSync(require('path').join(__dirname,'..','ChatHarbor.user.js'),'utf8');
   for (const marker of ['ch-pause-sync-btn','ch-cancel-sync-btn','同步仍在运行','batchSize: 10','batchPauseMinSec: 120','batchPauseMaxSec: 180','chatharbor_network_policy_v2','大量任务（更稳）']) {
-    assert(patcher.includes(marker),`missing static marker: ${marker}`);
+    assert(runtime.includes(marker),`missing static marker: ${marker}`);
   }
   console.log('PASS safer default preset 12-18s / 10 / 120-180s');
   console.log('PASS policy normalization and retry delays');
