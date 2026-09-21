@@ -30,11 +30,11 @@ Current public version: **v0.0.14.5**
 Recommended: **desktop Chromium (Edge / Chrome) + Tampermonkey**. The archive workflow relies on browser directory-access APIs; compatibility may differ in other browsers or userscript managers.
 
 1. Install Tampermonkey.
-2. Open [`ChatHarbor.user.js`](https://raw.githubusercontent.com/git-czxy/chat-harbor/main/ChatHarbor.user.js) and install it.
+2. Recommended: install from [Greasy Fork](https://greasyfork.org/scripts/596705-chatharbor). You can also install directly from GitHub by opening [`ChatHarbor.user.js`](https://raw.githubusercontent.com/git-czxy/chat-harbor/main/ChatHarbor.user.js).
 3. Open `https://chatgpt.com/` and click the ChatHarbor launcher on the right edge.
 4. On first use, choose a local archive directory.
 
-The userscript metadata points update checks to the `main` branch of this repository.
+Greasy Fork is a secondary distribution channel; GitHub remains the authoritative source for code and formal releases. GitHub-direct installations use the repository `main` branch as their update source, while Greasy Fork installations receive updates through Greasy Fork.
 
 ## Status semantics
 
