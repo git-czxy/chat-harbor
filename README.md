@@ -30,11 +30,11 @@ ChatHarbor 用于把你自己的 ChatGPT 对话持续保存到本地，并明确
 推荐环境：**桌面 Chromium 浏览器（Edge / Chrome）+ Tampermonkey**。当前归档流程依赖浏览器目录访问能力，其他浏览器或 Userscript 管理器的兼容性可能不同。
 
 1. 安装 Tampermonkey。
-2. 打开 [`ChatHarbor.user.js`](https://raw.githubusercontent.com/git-czxy/chat-harbor/main/ChatHarbor.user.js) 并安装。
+2. 推荐从 [Greasy Fork](https://greasyfork.org/scripts/596705-chatharbor) 安装；也可以直接打开 [`ChatHarbor.user.js`](https://raw.githubusercontent.com/git-czxy/chat-harbor/main/ChatHarbor.user.js) 从 GitHub 安装。
 3. 打开 `https://chatgpt.com/`，点击页面右侧 ChatHarbor 入口。
 4. 第一次使用时选择一个本地保存目录。
 
-更新地址已经写入 Userscript metadata；以后脚本管理器可从本仓库的 `main` 分支检查更新。
+Greasy Fork 是辅助发行渠道，GitHub 仍是代码与正式版本的权威来源。通过 GitHub 直接安装的脚本使用仓库 `main` 分支作为更新源；通过 Greasy Fork 安装的脚本由 Greasy Fork 提供后续更新。
 
 ## 使用原则
 
