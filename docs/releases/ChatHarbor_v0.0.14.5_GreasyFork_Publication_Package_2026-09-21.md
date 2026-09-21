@@ -1,9 +1,16 @@
 # ChatHarbor v0.0.14.5 — Greasy Fork Publication Package
 
 Date: **2026-09-21**  
-Status: **Ready for human-account submission**  
+Status: **Published / Human-confirmed**  
 Runtime baseline: **ChatHarbor v0.0.14.5**  
 Distribution policy: GitHub is authoritative; Greasy Fork is a secondary distribution channel.
+
+## Publication result
+
+- Greasy Fork page: https://greasyfork.org/scripts/596705-chatharbor
+- Published by the maintainer through the maintainer's Greasy Fork account on 2026-09-21.
+- Publication status is Human-confirmed from the maintainer's completed submission and returned public page URL.
+- Automated external verification was attempted immediately after publication, but the current retrieval environment could not fetch the Greasy Fork page directly and search indexing had not yet surfaced the new script. Those checks therefore remain unverified rather than inferred.
 
 ## 1. Publication decision
 
@@ -178,4 +185,4 @@ After publication, verify:
 - opening ChatGPT exposes the ChatHarbor launcher;
 - no unexpected metadata, antifeature, or permission warning appears.
 
-Record the final Greasy Fork script page URL in this document or the next release-governance update after successful publication.
+Final Greasy Fork script page URL recorded above. Publication is complete; browser-install smoke verification remains a separate validation step until directly observed.
