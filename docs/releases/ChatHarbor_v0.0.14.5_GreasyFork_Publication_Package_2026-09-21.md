@@ -185,4 +185,15 @@ After publication, verify:
 - opening ChatGPT exposes the ChatHarbor launcher;
 - no unexpected metadata, antifeature, or permission warning appears.
 
-Final Greasy Fork script page URL recorded above. Publication is complete; browser-install smoke verification remains a separate validation step until directly observed.
+Final Greasy Fork script page URL recorded above.
+
+## 9. Final browser-install validation
+
+Human validation completed on 2026-09-21:
+
+- Greasy Fork install entry opened correctly;
+- Tampermonkey installation completed successfully;
+- installed script identified as ChatHarbor v0.0.14.5;
+- ChatHarbor ran normally after installation.
+
+Result: **PASS — first Greasy Fork public distribution validated and closed.**
